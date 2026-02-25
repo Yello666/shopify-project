@@ -1,11 +1,32 @@
+/* 控制面板布局样式 */
+.dashboardLayout {
+  margin-top: 2rem;
+  gap: 1rem;
+}
+
+.dashboardButton {
+  margin-top: 1rem;
+  width: 100%;
+}
+
+/* 保留原有样式，仅调整间距 */
 .index {
-  align-items: center;
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  min-height: 100vh;
+  padding: 0 2rem;
   height: 100%;
   width: 100%;
   text-align: center;
-  padding: 1rem;
+}
+
+.content {
+  max-width: 1200px;
+  width: 100%;
+  display: grid;
+  gap: 2rem;
 }
 
 .heading,
@@ -19,10 +40,6 @@
   padding-bottom: 2rem;
 }
 
-.content {
-  display: grid;
-  gap: 2rem;
-}
 
 .form {
   display: flex;
