@@ -16,6 +16,10 @@
   --dash-border: rgba(0, 0, 0, 0.06);
 }
 
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
 .dash-app-background {
   min-height: 100%;
   background: var(--dash-bg);
@@ -44,6 +48,12 @@
   flex-direction: column;
   gap: 1rem;
   transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+/* 卡片内按钮始终固定在底部，无论文字多少 */
+.dash-feature-card .ant-btn {
+  margin-top: auto;
+  align-self: flex-start;
 }
 
 .dash-feature-card:hover {
@@ -93,110 +103,217 @@
   color: #2eb8d4;
 }
 
-.dash-feature-card .Polaris-Text--bodyMd {
+.dash-feature-card__desc {
+  margin: 0;
   color: var(--dash-muted);
   line-height: 1.55;
+  font-size: 0.9375rem;
 }
 
-/* Primary-style buttons (Polaris 13 uses hashed classes — target via wrapper) */
-.dash-styled-primary {
-  display: inline-flex;
-}
-
-.dash-styled-primary button {
+/* ── Ant Design overrides ────────────────────────────────────────── */
+.ant-btn-primary {
   background: linear-gradient(135deg, var(--dash-blue) 0%, var(--dash-purple) 100%) !important;
-  color: #fff !important;
   border: none !important;
   box-shadow: 0 4px 14px rgba(77, 105, 250, 0.32) !important;
-  border-radius: var(--dash-radius-sm) !important;
 }
 
-.dash-styled-primary button:hover {
+.ant-btn-primary:hover {
   filter: brightness(1.06);
   box-shadow: 0 6px 18px rgba(77, 105, 250, 0.38) !important;
 }
 
-.dash-styled-outline {
-  display: inline-flex;
+.ant-btn {
+  border-radius: var(--dash-radius-sm) !important;
 }
 
-.dash-styled-outline button {
-  border-radius: var(--dash-radius-sm) !important;
-  border: 1px solid var(--dash-border) !important;
-  background: var(--dash-card) !important;
+.ant-modal .ant-modal-header {
+  border-radius: var(--dash-radius) var(--dash-radius) 0 0;
+}
+
+.ant-modal .ant-modal-content {
+  border-radius: var(--dash-radius);
+}
+
+.ant-modal .ant-modal-footer {
+  border-radius: 0 0 var(--dash-radius) var(--dash-radius);
+}
+
+.ant-modal-title {
+  font-weight: 600 !important;
   color: var(--dash-text) !important;
 }
 
-.dash-styled-outline button:hover {
-  border-color: rgba(77, 105, 250, 0.35) !important;
-  background: rgba(77, 105, 250, 0.04) !important;
-}
-
-/* Polaris cards inside pages */
-.dash-panel,
-.dash-list-item .Polaris-Card,
-.dash-section-inner .Polaris-Card {
-  border-radius: var(--dash-radius) !important;
-  box-shadow: var(--dash-shadow) !important;
-  border: 1px solid var(--dash-border) !important;
-  overflow: hidden;
-}
-
-.dash-list-item {
-  margin-bottom: 0;
-}
-
-.dash-divider {
-  border: none;
-  border-top: 1px solid var(--dash-border);
-  margin: 1.25rem 0 0;
-}
-
-.dash-page-loading {
+/* 弹窗内的表单堆叠 */
+.ant-form-stack {
   display: flex;
-  justify-content: center;
-  padding: 3rem;
-  background: var(--dash-card);
-  border-radius: var(--dash-radius);
-  box-shadow: var(--dash-shadow);
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.dash-end-hint {
-  display: block;
-  padding-top: 1.5rem;
-  padding-bottom: 1rem;
-  text-align: center;
+.ant-form-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: flex-start;
+  gap: 0 1rem;
+}
+
+.ant-form-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--dash-text);
+  line-height: 32px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ant-form-label--opt {
   color: var(--dash-muted);
-  font-size: 0.9rem;
+  font-weight: 400;
 }
 
-.dash-row {
-  display: flex;
-  gap: 0.5rem;
-  word-break: break-word;
+.ant-form-required {
+  color: #d72c0d;
+  font-weight: 600;
 }
 
-.dash-row-label {
-  min-width: 5rem;
-  color: var(--dash-muted);
-}
-
-.dash-match-section .Polaris-Layout {
-  max-width: 100%;
-}
-
-/* Modal polish */
-.Polaris-Modal-Dialog__Modal {
-  border-radius: var(--dash-radius) !important;
-}
-
-.Polaris-TextField__Input,
-.Polaris-Select__Input {
+.ant-form-stack .ant-input,
+.ant-form-stack .ant-input-affix-wrapper,
+.ant-form-stack .ant-input-textarea textarea {
   border-radius: var(--dash-radius-sm) !important;
 }
 
-/* ---------- 热点列表：联系人表风格（斑马纹、无竖线边框） ---------- */
+.dash-text-error {
+  color: #d72c0d;
+  font-size: 0.875rem;
+  margin: 0;
+}
 
+.dash-text-loading {
+  color: var(--dash-muted);
+  margin: 0;
+}
+
+/* ── 品牌信息表单：与上方热点行同宽的简约卡片 ── */
+.hotspot-form-card {
+  background: var(--dash-card);
+  border-radius: var(--dash-radius);
+  box-shadow: var(--dash-shadow);
+  border: 1px solid var(--dash-border);
+  overflow: hidden;
+  /* 内容区撑满 */
+}
+
+.hotspot-form-card__fields {
+  display: flex;
+  flex-direction: column;
+}
+
+.hotspot-form-card__row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: center;
+  gap: 0 1.25rem;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--dash-border);
+  transition: background 0.15s;
+}
+
+.hotspot-form-card__row:last-of-type {
+  border-bottom: none;
+}
+
+.hotspot-form-card__row:hover {
+  background: rgba(77, 105, 250, 0.02);
+}
+
+.hotspot-form-card__label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--dash-text);
+  text-align: right;
+  white-space: nowrap;
+  line-height: 1.35;
+  padding-right: 0.5rem;
+  /* 防止长文本溢出 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hotspot-form-card__label--opt {
+  color: var(--dash-muted);
+  font-weight: 400;
+}
+
+.hotspot-form-card__required {
+  color: #d72c0d;
+  font-weight: 600;
+}
+
+.hotspot-form-card__row .ant-input,
+.hotspot-form-card__row .ant-select .ant-select-selector {
+  border-radius: var(--dash-radius-sm) !important;
+  background: rgba(77, 105, 250, 0.03) !important;
+  border-color: rgba(77, 105, 250, 0.15) !important;
+  color: var(--dash-text) !important;
+  box-shadow: none !important;
+  min-height: 36px !important;
+  height: auto !important;
+  padding: 2px 12px !important;
+}
+
+.hotspot-form-card__row .ant-input::placeholder {
+  color: var(--dash-muted);
+}
+
+.hotspot-form-card__row .ant-input:hover,
+.hotspot-form-card__row .ant-select .ant-select-selector:hover {
+  border-color: rgba(77, 105, 250, 0.3) !important;
+}
+
+.hotspot-form-card__row .ant-input:focus,
+.hotspot-form-card__row .ant-input-focused,
+.hotspot-form-card__row .ant-select-focused .ant-select-selector {
+  border-color: var(--dash-blue) !important;
+  box-shadow: 0 0 0 3px rgba(77, 105, 250, 0.1) !important;
+  outline: none !important;
+}
+
+.hotspot-form-card__row .ant-select-selection-item {
+  font-size: 0.875rem !important;
+  margin-top: 1px !important;
+}
+
+.hotspot-form-card__row .ant-select-selection-item-content {
+  margin-right: 4px !important;
+}
+
+.hotspot-form-card__row .ant-select-selection-placeholder {
+  color: var(--dash-muted) !important;
+  line-height: 30px !important;
+}
+
+/* Select dropdown arrow align */
+.hotspot-form-card__row .ant-select .ant-select-arrow {
+  right: 12px !important;
+}
+
+.hotspot-form-card__error {
+  color: #d72c0d;
+  font-size: 0.875rem;
+  padding: 0.5rem 1.5rem;
+  margin: 0;
+  border-top: 1px solid var(--dash-border);
+}
+
+.hotspot-form-card__footer {
+  padding: 1rem 1.5rem;
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--dash-border);
+  background: #fafbfc;
+}
+
+/* ── 热点列表 ── */
 .hotspot-table {
   background: #ffffff;
   border-radius: var(--dash-radius);
@@ -256,230 +373,6 @@
   align-self: start;
 }
 
-/* ── 品牌信息表单：与上方热点行同宽的简约卡片 ── */
-.hotspot-form-card {
-  background: var(--dash-card);
-  border-radius: var(--dash-radius);
-  box-shadow: var(--dash-shadow);
-  border: 1px solid var(--dash-border);
-  overflow: hidden;
-}
-
-.hotspot-form-card__fields {
-  display: flex;
-  flex-direction: column;
-}
-
-.hotspot-form-card__row {
-  display: grid;
-  grid-template-columns: 120px 1fr;
-  align-items: center;
-  gap: 0.875rem 1.25rem;
-  padding: 0.875rem 1.25rem;
-  border-bottom: 1px solid var(--dash-border);
-}
-
-.hotspot-form-card__row:last-child {
-  border-bottom: none;
-}
-
-.hotspot-form-card__label {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--dash-text);
-  text-align: right;
-  white-space: nowrap;
-  line-height: 1;
-}
-
-.hotspot-form-card__label--opt {
-  color: var(--dash-muted);
-  font-weight: 400;
-}
-
-.hotspot-form-card__required {
-  color: #d72c0d;
-  font-weight: 600;
-}
-
-.hotspot-form-card__row .Polaris-TextField {
-  width: 100%;
-}
-
-.hotspot-form-card__row .Polaris-TextField__Input {
-  border-radius: var(--dash-radius-sm) !important;
-  background: rgba(77, 105, 250, 0.03) !important;
-  border: 1px solid rgba(77, 105, 250, 0.15) !important;
-  color: var(--dash-text) !important;
-  text-align: left !important;
-  box-shadow: none !important;
-}
-
-.hotspot-form-card__row .Polaris-TextField__Input::placeholder {
-  color: var(--dash-muted);
-}
-
-.hotspot-form-card__row .Polaris-TextField__Input:hover {
-  border-color: rgba(77, 105, 250, 0.3) !important;
-}
-
-.hotspot-form-card__row .Polaris-TextField__Input:focus {
-  border-color: var(--dash-blue) !important;
-  box-shadow: 0 0 0 3px rgba(77, 105, 250, 0.1) !important;
-  outline: none !important;
-}
-
-.hotspot-form-card__error {
-  color: #d72c0d;
-  font-size: 0.875rem;
-  padding: 0.5rem 1.25rem;
-  margin: 0;
-}
-
-.hotspot-form-card__footer {
-  padding: 0.875rem 1.25rem;
-  display: flex;
-  justify-content: flex-end;
-  border-top: 1px solid var(--dash-border);
-}
-
-/* 弹窗内使用：去掉外层卡片的内边距和阴影，与 Modal.Section 贴合 */
-.hotspot-form-card--modal {
-  background: transparent;
-  border-radius: 0;
-  box-shadow: none;
-  border: none;
-  overflow: visible;
-}
-
-.hotspot-form-card--modal .hotspot-form-card__row {
-  padding: 0.625rem 0;
-  grid-template-columns: 100px 1fr;
-  gap: 0 1rem;
-}
-
-.hotspot-form-card--modal .hotspot-form-card__label {
-  text-align: left;
-  padding-top: 0.25rem;
-}
-
-.hotspot-form-card--modal .hotspot-form-card__footer {
-  padding: 0.75rem 0 0;
-  justify-content: flex-start;
-  border-top: none;
-}
-
-.hotspot-form-card--modal .hotspot-form-card__error {
-  padding: 0.5rem 0;
-}
-
-/* 表单行：垂直居中 */
-.hotspot-form-table {
-  width: 100%;
-}
-
-.hotspot-form-row {
-  display: grid;
-  grid-template-columns: 36px 120px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.75rem 1.25rem;
-  padding: 0.875rem 1.25rem;
-  border-bottom: 1px solid var(--dash-border);
-}
-
-.hotspot-form-row:first-child {
-  border-top: none;
-}
-
-.hotspot-form-row:last-child {
-  border-bottom: none;
-}
-
-.hotspot-form-row--alt {
-  background: #f8f9ff;
-}
-
-.hotspot-form-row__label {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--dash-muted);
-  text-align: right;
-  white-space: nowrap;
-  line-height: 1;
-}
-
-.hotspot-form-row__field {
-  display: flex;
-  align-items: center;
-}
-
-.hotspot-form-row__field .Polaris-TextField {
-  width: 100%;
-}
-
-.hotspot-form-row__field .Polaris-TextField input,
-.hotspot-form-row__field .Polaris-TextField textarea {
-  text-align: center !important;
-  border-radius: var(--dash-radius-sm) !important;
-  background: rgba(77, 105, 250, 0.03) !important;
-  border-color: rgba(77, 105, 250, 0.12) !important;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.hotspot-form-row__field .Polaris-TextField input:hover,
-.hotspot-form-row__field .Polaris-TextField textarea:hover {
-  border-color: rgba(77, 105, 250, 0.3) !important;
-}
-
-.hotspot-form-row__field .Polaris-TextField input:focus,
-.hotspot-form-row__field .Polaris-TextField textarea:focus {
-  border-color: var(--dash-blue) !important;
-  box-shadow: 0 0 0 3px rgba(77, 105, 250, 0.1) !important;
-  background: #ffffff !important;
-}
-
-.hotspot-form-row__action {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
-.hotspot-form-row__submit {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 1rem;
-}
-
-.hotspot-form-row__submit .dash-error {
-  font-size: 0.875rem;
-}
-
-@media (max-width: 640px) {
-  .hotspot-form-row {
-    grid-template-columns: 36px 1fr;
-    grid-template-rows: auto auto;
-    gap: 0.5rem;
-  }
-
-  .hotspot-form-row__label {
-    grid-column: 2;
-    grid-row: 1;
-    text-align: left;
-  }
-
-  .hotspot-form-row__field {
-    grid-column: 2;
-    grid-row: 2;
-  }
-
-  .hotspot-form-row__action,
-  .hotspot-form-row__submit {
-    grid-column: 1 / -1;
-  }
-}
-
 .hotspot-table-row__col {
   min-width: 0;
   display: flex;
@@ -509,12 +402,36 @@
   word-break: break-word;
 }
 
-.hotspot-table-row__label {
-  font-size: 0.875rem;
+.hotspot-table-row__col--action {
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.hotspot-table-row__btn--full {
+  width: 100%;
+  max-width: 100%;
+  justify-content: center;
+}
+
+.hotspot-table-row-extra {
+  padding: 0.5rem 1.25rem 0.75rem 1.25rem;
+  padding-left: calc(40px + 1.25rem + 1.25rem);
+  font-size: 0.8125rem;
   color: var(--dash-muted);
-  font-weight: 500;
-  white-space: nowrap;
-  line-height: 1;
+  border-top: 1px solid transparent;
+}
+
+.hotspot-table-row-extra.hotspot-table-row--alt {
+  background: #f8f9ff;
+}
+
+.hotspot-table-row-extra a {
+  color: var(--dash-blue);
+  text-decoration: none;
+}
+
+.hotspot-table-row-extra a:hover {
+  text-decoration: underline;
 }
 
 .result-score {
@@ -524,7 +441,7 @@
   letter-spacing: -0.02em;
 }
 
-/* ── 全局返回按钮 ─────────────────────────────────────────────── */
+/* ── 全局返回按钮 ── */
 .dash-back-btn {
   display: inline-flex;
   align-items: center;
@@ -560,40 +477,40 @@
   opacity: 0.75;
 }
 
-.hotspot-table-row__col--action {
-  align-items: flex-start;
-  gap: 0.5rem;
-}
-
-.hotspot-table-row__btn {
-  width: 100%;
-  max-width: 100%;
-}
-
-.hotspot-table-row__btn button {
-  width: 100%;
+.dash-page-loading {
+  display: flex;
   justify-content: center;
+  padding: 3rem;
+  background: var(--dash-card);
+  border-radius: var(--dash-radius);
+  box-shadow: var(--dash-shadow);
 }
 
-.hotspot-table-row-extra {
-  padding: 0.5rem 1.25rem 0.75rem 1.25rem;
-  padding-left: calc(40px + 1.25rem + 1.25rem);
-  font-size: 0.8125rem;
+.dash-end-hint {
+  display: block;
+  padding-top: 1.5rem;
+  padding-bottom: 1rem;
+  text-align: center;
   color: var(--dash-muted);
-  border-top: 1px solid transparent;
+  font-size: 0.9rem;
+  margin: 0;
 }
 
-.hotspot-table-row-extra.hotspot-table-row--alt {
-  background: #f8f9ff;
+.dash-divider {
+  border: none;
+  border-top: 1px solid var(--dash-border);
+  margin: 1.25rem 0 0;
 }
 
-.hotspot-table-row-extra a {
-  color: var(--dash-blue);
-  text-decoration: none;
+.dash-row {
+  display: flex;
+  gap: 0.5rem;
+  word-break: break-word;
 }
 
-.hotspot-table-row-extra a:hover {
-  text-decoration: underline;
+.dash-row-label {
+  min-width: 5rem;
+  color: var(--dash-muted);
 }
 
 @media (max-width: 900px) {

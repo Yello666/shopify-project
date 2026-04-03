@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Text, Button, Modal, TextField } from "@shopify/polaris";
+import { Button, Modal, Input } from "antd";
 
 export const loader = async ({ request }) => {
   try {
@@ -47,14 +47,12 @@ export default function Index() {
                 📋
               </span>
             </div>
-            <Text variant="bodyMd">
+            <p className="dash-feature-card__desc">
               编辑品牌名称、定位描述、品牌调性等核心信息
-            </Text>
-            <div className="dash-styled-primary">
-              <Button primary onClick={handleBrandEdit}>
-                进入编辑
-              </Button>
-            </div>
+            </p>
+            <Button type="primary" onClick={handleBrandEdit}>
+              进入编辑
+            </Button>
           </div>
 
           <div className="dash-feature-card dash-accent-blue">
@@ -64,14 +62,12 @@ export default function Index() {
                 🔥
               </span>
             </div>
-            <Text variant="bodyMd">
+            <p className="dash-feature-card__desc">
               查看最新行业热点、流量数据、用户关注趋势，并生成营销内容
-            </Text>
-            <div className="dash-styled-primary">
-              <Button primary onClick={handleHotspotView}>
-                查看热点
-              </Button>
-            </div>
+            </p>
+            <Button type="primary" onClick={handleHotspotView}>
+              查看热点
+            </Button>
           </div>
 
           <div className="dash-feature-card dash-accent-teal">
@@ -81,14 +77,12 @@ export default function Index() {
                 📈
               </span>
             </div>
-            <Text variant="bodyMd">
+            <p className="dash-feature-card__desc">
               根据市场波动与竞争态势，智能调整商品定价策略
-            </Text>
-            <div className="dash-styled-primary">
-              <Button primary onClick={handleDynamicPrice}>
-                开始调价
-              </Button>
-            </div>
+            </p>
+            <Button type="primary" onClick={handleDynamicPrice}>
+              开始调价
+            </Button>
           </div>
         </div>
       </div>
@@ -96,110 +90,78 @@ export default function Index() {
       {/* 品牌信息编辑弹窗 */}
       <Modal
         open={brandModalOpen}
-        onClose={() => setBrandModalOpen(false)}
+        onCancel={() => setBrandModalOpen(false)}
         title="编辑品牌信息"
-        primaryAction={{
-          content: "保存",
-          onAction: handleBrandSubmit,
-        }}
-        secondaryActions={[
-          {
-            content: "取消",
-            onAction: () => setBrandModalOpen(false),
-          },
-        ]}
+        okText="保存"
+        cancelText="取消"
+        onOk={handleBrandSubmit}
       >
-        <Modal.Section>
-          <div className="hotspot-form-card hotspot-form-card--modal">
-            <div className="hotspot-form-card__fields">
-              <div className="hotspot-form-card__row">
-                <label className="hotspot-form-card__label" htmlFor="index-brand-name">
-                  品牌名称 <span className="hotspot-form-card__required">*</span>
-                </label>
-                <TextField
-                  id="index-brand-name"
-                  labelHidden
-                  value={brandForm.brandName}
-                  onChange={(val) =>
-                    setBrandForm((f) => ({ ...f, brandName: val }))
-                  }
-                  placeholder="请输入品牌名称"
-                  autoComplete="organization"
-                />
-              </div>
-              <div className="hotspot-form-card__row">
-                <label className="hotspot-form-card__label" htmlFor="index-brand-desc">
-                  定位描述
-                </label>
-                <TextField
-                  id="index-brand-desc"
-                  labelHidden
-                  value={brandForm.description}
-                  onChange={(val) =>
-                    setBrandForm((f) => ({ ...f, description: val }))
-                  }
-                  placeholder="请输入品牌定位描述"
-                  multiline={2}
-                />
-              </div>
-              <div className="hotspot-form-card__row">
-                <label className="hotspot-form-card__label hotspot-form-card__label--opt" htmlFor="index-brand-tone">
-                  品牌调性（选填）
-                </label>
-                <TextField
-                  id="index-brand-tone"
-                  labelHidden
-                  value={brandForm.tone}
-                  onChange={(val) =>
-                    setBrandForm((f) => ({ ...f, tone: val }))
-                  }
-                  placeholder="如：高端奢华、年轻活力、简约自然"
-                />
-              </div>
-            </div>
+        <div className="ant-form-stack">
+          <div className="ant-form-row">
+            <label className="ant-form-label" htmlFor="modal-brand-name">
+              品牌名称 <span className="ant-form-required">*</span>
+            </label>
+            <Input
+              id="modal-brand-name"
+              value={brandForm.brandName}
+              onChange={(e) =>
+                setBrandForm((f) => ({ ...f, brandName: e.target.value }))
+              }
+              placeholder="请输入品牌名称"
+            />
           </div>
-        </Modal.Section>
+          <div className="ant-form-row">
+            <label className="ant-form-label" htmlFor="modal-brand-desc">
+              定位描述
+            </label>
+            <Input.TextArea
+              id="modal-brand-desc"
+              value={brandForm.description}
+              onChange={(e) =>
+                setBrandForm((f) => ({ ...f, description: e.target.value }))
+              }
+              placeholder="请输入品牌定位描述"
+              rows={2}
+            />
+          </div>
+          <div className="ant-form-row">
+            <label className="ant-form-label ant-form-label--opt" htmlFor="modal-brand-tone">
+              品牌调性（选填）
+            </label>
+            <Input
+              id="modal-brand-tone"
+              value={brandForm.tone}
+              onChange={(e) =>
+                setBrandForm((f) => ({ ...f, tone: e.target.value }))
+              }
+              placeholder="如：高端奢华、年轻活力、简约自然"
+            />
+          </div>
+        </div>
       </Modal>
 
       {/* 动态调价弹窗 */}
       <Modal
         open={priceModalOpen}
-        onClose={() => setPriceModalOpen(false)}
+        onCancel={() => setPriceModalOpen(false)}
         title="动态调价"
-        primaryAction={{
-          content: "确认调价",
-          onAction: handlePriceSubmit,
-        }}
-        secondaryActions={[
-          {
-            content: "取消",
-            onAction: () => setPriceModalOpen(false),
-          },
-        ]}
+        okText="确认调价"
+        cancelText="取消"
+        onOk={handlePriceSubmit}
       >
-        <Modal.Section>
-          <div className="hotspot-form-card hotspot-form-card--modal">
-            <div className="hotspot-form-card__fields">
-              <div className="hotspot-form-card__row">
-                <label className="hotspot-form-card__label hotspot-form-card__label--opt" htmlFor="index-price-note">
-                  说明（选填）
-                </label>
-                <TextField
-                  id="index-price-note"
-                  labelHidden
-                  placeholder="系统将根据市场波动与竞争态势，智能调整商品定价策略"
-                  multiline={2}
-                  readOnly
-                />
-              </div>
-            </div>
-            <div className="hotspot-form-card__footer">
-              <Text tone="subdued" variant="bodySm">
-                点击「确认调价」后将触发调价逻辑
-              </Text>
-            </div>
+        <div className="ant-form-stack">
+          <div className="ant-form-row">
+            <label className="ant-form-label ant-form-label--opt" htmlFor="modal-price-note">
+              说明（选填）
+            </label>
+            <Input.TextArea
+              id="modal-price-note"
+              value="系统将根据市场波动与竞争态势，智能调整商品定价策略。点击「确认调价」后将触发调价逻辑。"
+              rows={2}
+              readOnly
+            />
           </div>
-        </Modal.Section>
+        </div>
       </Modal>
     </>
   );

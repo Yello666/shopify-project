@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Text, Button, BlockStack, Spinner, EmptyState } from "@shopify/polaris";
+import { Button, Space, Spin, Empty } from "antd";
 
 function formatTags(tags) {
   if (!Array.isArray(tags) || tags.length === 0) return "";
@@ -65,11 +65,9 @@ function HotspotItem({ item = {}, index, onGenerate }) {
         </div>
         <div className="hotspot-table-row__col hotspot-table-row__col--action">
           <span className="hotspot-table-row__text">{viewsLikes || "—"}</span>
-          <div className="dash-styled-outline hotspot-table-row__btn">
-            <Button onClick={() => onGenerate(item)}>
-              基于此热点生成营销内容
-            </Button>
-          </div>
+          <Button onClick={() => onGenerate(item)} className="hotspot-table-row__btn--full">
+            基于此热点生成营销内容
+          </Button>
         </div>
       </div>
       {hasExtra ? (
@@ -166,23 +164,24 @@ export default function Hotspot() {
         <div className="dash-shell dash-section-inner">
           {loading && (
             <div className="dash-page-loading">
-              <Spinner size="large" />
+              <Spin size="large" />
             </div>
           )}
 
           {error && !loading && (
-            <BlockStack gap="300">
-              <Text tone="critical">加载失败：{error}</Text>
-              <div className="dash-styled-outline">
-                <Button onClick={() => window.location.reload()}>重试</Button>
-              </div>
-            </BlockStack>
+            <Space direction="vertical" style={{ width: "100%" }} size="middle">
+              <p className="dash-text-error">加载失败：{error}</p>
+              <Button onClick={() => window.location.reload()}>重试</Button>
+            </Space>
           )}
 
           {!loading && !error && hotspots.length === 0 && (
-            <EmptyState heading="暂无热点数据" image={null}>
-              <Text>当前没有可用的热点内容，请稍后再试。</Text>
-            </EmptyState>
+            <Empty
+              description="暂无热点数据"
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+            >
+              <p style={{ color: "var(--dash-muted)" }}>当前没有可用的热点内容，请稍后再试。</p>
+            </Empty>
           )}
 
           {!loading && !error && hotspots.length > 0 && (
@@ -208,9 +207,9 @@ export default function Hotspot() {
           )}
 
           {reachedEnd && hotspots.length > 0 && (
-            <Text tone="subdued" alignment="center" className="dash-end-hint">
+            <p className="dash-end-hint">
               已经到底了哦～
-            </Text>
+            </p>
           )}
 
           <div ref={sentinelRef} style={{ height: "1px" }} />

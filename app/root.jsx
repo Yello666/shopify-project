@@ -1,5 +1,6 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 import "./styles/dashboard-theme.css";
+import "antd/dist/reset.css";
 
 export default function App() {
   return (
