@@ -1,30 +1,39 @@
 import { Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { AppProvider } from "@shopify/shopify-app-react-router/react";
+import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }) => {
-  await authenticate.admin(request);
+  try {
+    await authenticate.admin(request);
+    // eslint-disable-next-line no-undef
+    return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  } catch {
+    return { apiKey: "" };
+  }
+};
 
-  // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+const polarisI18n = {
+  locale: "zh-CN",
+  messages: {},
 };
 
 export default function App() {
-  const { apiKey } = useLoaderData();
+  useLoaderData();
 
   return (
-    <AppProvider embedded apiKey={apiKey}>
+    <PolarisAppProvider i18n={polarisI18n}>
       <s-app-nav>
         <s-link href="/app">Home</s-link>
         <s-link href="/app/additional">Additional page</s-link>
       </s-app-nav>
-      <Outlet />
-    </AppProvider>
+      <div className="dash-app-background">
+        <Outlet />
+      </div>
+    </PolarisAppProvider>
   );
 }
 
-// Shopify needs React Router to catch some thrown responses, so that their headers are included in the response.
 export function ErrorBoundary() {
   return boundary.error(useRouteError());
 }

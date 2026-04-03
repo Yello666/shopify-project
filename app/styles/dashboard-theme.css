@@ -1,0 +1,636 @@
+/* Dashboard theme — matches reference: soft cards, Inter, accent palette */
+
+:root {
+  --dash-bg: #f4f6f9;
+  --dash-card: #ffffff;
+  --dash-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  --dash-shadow-hover: 0 8px 28px rgba(77, 105, 250, 0.12);
+  --dash-radius: 16px;
+  --dash-radius-sm: 8px;
+  --dash-blue: #4d69fa;
+  --dash-purple: #6c5dd3;
+  --dash-teal: #4bcbeb;
+  --dash-orange: #ffb547;
+  --dash-text: #1a1d2e;
+  --dash-muted: #8f9bb3;
+  --dash-border: rgba(0, 0, 0, 0.06);
+}
+
+.dash-app-background {
+  min-height: 100%;
+  background: var(--dash-bg);
+  padding: 1.25rem 1.25rem 2rem;
+  box-sizing: border-box;
+}
+
+.dash-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.dash-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.dash-feature-card {
+  background: var(--dash-card);
+  border-radius: var(--dash-radius);
+  box-shadow: var(--dash-shadow);
+  padding: 1.5rem;
+  border: 1px solid var(--dash-border);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.dash-feature-card:hover {
+  box-shadow: var(--dash-shadow-hover);
+}
+
+.dash-feature-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.dash-card-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--dash-text);
+  line-height: 1.35;
+  font-family: inherit;
+}
+
+.dash-icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.dash-accent-orange .dash-icon-box {
+  background: rgba(255, 181, 71, 0.18);
+  color: #e09a2e;
+}
+
+.dash-accent-blue .dash-icon-box {
+  background: rgba(77, 105, 250, 0.14);
+  color: var(--dash-blue);
+}
+
+.dash-accent-teal .dash-icon-box {
+  background: rgba(75, 203, 235, 0.16);
+  color: #2eb8d4;
+}
+
+.dash-feature-card .Polaris-Text--bodyMd {
+  color: var(--dash-muted);
+  line-height: 1.55;
+}
+
+/* Primary-style buttons (Polaris 13 uses hashed classes — target via wrapper) */
+.dash-styled-primary {
+  display: inline-flex;
+}
+
+.dash-styled-primary button {
+  background: linear-gradient(135deg, var(--dash-blue) 0%, var(--dash-purple) 100%) !important;
+  color: #fff !important;
+  border: none !important;
+  box-shadow: 0 4px 14px rgba(77, 105, 250, 0.32) !important;
+  border-radius: var(--dash-radius-sm) !important;
+}
+
+.dash-styled-primary button:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 6px 18px rgba(77, 105, 250, 0.38) !important;
+}
+
+.dash-styled-outline {
+  display: inline-flex;
+}
+
+.dash-styled-outline button {
+  border-radius: var(--dash-radius-sm) !important;
+  border: 1px solid var(--dash-border) !important;
+  background: var(--dash-card) !important;
+  color: var(--dash-text) !important;
+}
+
+.dash-styled-outline button:hover {
+  border-color: rgba(77, 105, 250, 0.35) !important;
+  background: rgba(77, 105, 250, 0.04) !important;
+}
+
+/* Polaris cards inside pages */
+.dash-panel,
+.dash-list-item .Polaris-Card,
+.dash-section-inner .Polaris-Card {
+  border-radius: var(--dash-radius) !important;
+  box-shadow: var(--dash-shadow) !important;
+  border: 1px solid var(--dash-border) !important;
+  overflow: hidden;
+}
+
+.dash-list-item {
+  margin-bottom: 0;
+}
+
+.dash-divider {
+  border: none;
+  border-top: 1px solid var(--dash-border);
+  margin: 1.25rem 0 0;
+}
+
+.dash-page-loading {
+  display: flex;
+  justify-content: center;
+  padding: 3rem;
+  background: var(--dash-card);
+  border-radius: var(--dash-radius);
+  box-shadow: var(--dash-shadow);
+}
+
+.dash-end-hint {
+  display: block;
+  padding-top: 1.5rem;
+  padding-bottom: 1rem;
+  text-align: center;
+  color: var(--dash-muted);
+  font-size: 0.9rem;
+}
+
+.dash-row {
+  display: flex;
+  gap: 0.5rem;
+  word-break: break-word;
+}
+
+.dash-row-label {
+  min-width: 5rem;
+  color: var(--dash-muted);
+}
+
+.dash-match-section .Polaris-Layout {
+  max-width: 100%;
+}
+
+/* Modal polish */
+.Polaris-Modal-Dialog__Modal {
+  border-radius: var(--dash-radius) !important;
+}
+
+.Polaris-TextField__Input,
+.Polaris-Select__Input {
+  border-radius: var(--dash-radius-sm) !important;
+}
+
+/* ---------- 热点列表：联系人表风格（斑马纹、无竖线边框） ---------- */
+
+.hotspot-table {
+  background: #ffffff;
+  border-radius: var(--dash-radius);
+  box-shadow: var(--dash-shadow);
+  border: 1px solid var(--dash-border);
+  overflow: hidden;
+}
+
+.hotspot-table-header,
+.hotspot-table-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1.15fr) minmax(0, 1.85fr) minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  padding: 0.875rem 1.25rem;
+  text-align: left;
+}
+
+.hotspot-table-header {
+  background: #fafbfc;
+  color: var(--dash-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--dash-border);
+}
+
+.hotspot-table-header__spacer {
+  width: 36px;
+  justify-self: start;
+}
+
+.hotspot-table-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.hotspot-table-row {
+  background: #ffffff;
+  color: var(--dash-text);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+
+.hotspot-table-row--alt {
+  background: #f8f9ff;
+}
+
+.hotspot-table-row__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, rgba(77, 105, 250, 0.12), rgba(108, 93, 211, 0.08));
+  border: 1px solid rgba(77, 105, 250, 0.1);
+  flex-shrink: 0;
+  justify-self: start;
+  align-self: start;
+}
+
+/* ── 品牌信息表单：与上方热点行同宽的简约卡片 ── */
+.hotspot-form-card {
+  background: var(--dash-card);
+  border-radius: var(--dash-radius);
+  box-shadow: var(--dash-shadow);
+  border: 1px solid var(--dash-border);
+  overflow: hidden;
+}
+
+.hotspot-form-card__fields {
+  display: flex;
+  flex-direction: column;
+}
+
+.hotspot-form-card__row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: center;
+  gap: 0.875rem 1.25rem;
+  padding: 0.875rem 1.25rem;
+  border-bottom: 1px solid var(--dash-border);
+}
+
+.hotspot-form-card__row:last-child {
+  border-bottom: none;
+}
+
+.hotspot-form-card__label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--dash-text);
+  text-align: right;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.hotspot-form-card__label--opt {
+  color: var(--dash-muted);
+  font-weight: 400;
+}
+
+.hotspot-form-card__required {
+  color: #d72c0d;
+  font-weight: 600;
+}
+
+.hotspot-form-card__row .Polaris-TextField {
+  width: 100%;
+}
+
+.hotspot-form-card__row .Polaris-TextField__Input {
+  border-radius: var(--dash-radius-sm) !important;
+  background: rgba(77, 105, 250, 0.03) !important;
+  border: 1px solid rgba(77, 105, 250, 0.15) !important;
+  color: var(--dash-text) !important;
+  text-align: left !important;
+  box-shadow: none !important;
+}
+
+.hotspot-form-card__row .Polaris-TextField__Input::placeholder {
+  color: var(--dash-muted);
+}
+
+.hotspot-form-card__row .Polaris-TextField__Input:hover {
+  border-color: rgba(77, 105, 250, 0.3) !important;
+}
+
+.hotspot-form-card__row .Polaris-TextField__Input:focus {
+  border-color: var(--dash-blue) !important;
+  box-shadow: 0 0 0 3px rgba(77, 105, 250, 0.1) !important;
+  outline: none !important;
+}
+
+.hotspot-form-card__error {
+  color: #d72c0d;
+  font-size: 0.875rem;
+  padding: 0.5rem 1.25rem;
+  margin: 0;
+}
+
+.hotspot-form-card__footer {
+  padding: 0.875rem 1.25rem;
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--dash-border);
+}
+
+/* 弹窗内使用：去掉外层卡片的内边距和阴影，与 Modal.Section 贴合 */
+.hotspot-form-card--modal {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  border: none;
+  overflow: visible;
+}
+
+.hotspot-form-card--modal .hotspot-form-card__row {
+  padding: 0.625rem 0;
+  grid-template-columns: 100px 1fr;
+  gap: 0 1rem;
+}
+
+.hotspot-form-card--modal .hotspot-form-card__label {
+  text-align: left;
+  padding-top: 0.25rem;
+}
+
+.hotspot-form-card--modal .hotspot-form-card__footer {
+  padding: 0.75rem 0 0;
+  justify-content: flex-start;
+  border-top: none;
+}
+
+.hotspot-form-card--modal .hotspot-form-card__error {
+  padding: 0.5rem 0;
+}
+
+/* 表单行：垂直居中 */
+.hotspot-form-table {
+  width: 100%;
+}
+
+.hotspot-form-row {
+  display: grid;
+  grid-template-columns: 36px 120px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  padding: 0.875rem 1.25rem;
+  border-bottom: 1px solid var(--dash-border);
+}
+
+.hotspot-form-row:first-child {
+  border-top: none;
+}
+
+.hotspot-form-row:last-child {
+  border-bottom: none;
+}
+
+.hotspot-form-row--alt {
+  background: #f8f9ff;
+}
+
+.hotspot-form-row__label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--dash-muted);
+  text-align: right;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.hotspot-form-row__field {
+  display: flex;
+  align-items: center;
+}
+
+.hotspot-form-row__field .Polaris-TextField {
+  width: 100%;
+}
+
+.hotspot-form-row__field .Polaris-TextField input,
+.hotspot-form-row__field .Polaris-TextField textarea {
+  text-align: center !important;
+  border-radius: var(--dash-radius-sm) !important;
+  background: rgba(77, 105, 250, 0.03) !important;
+  border-color: rgba(77, 105, 250, 0.12) !important;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.hotspot-form-row__field .Polaris-TextField input:hover,
+.hotspot-form-row__field .Polaris-TextField textarea:hover {
+  border-color: rgba(77, 105, 250, 0.3) !important;
+}
+
+.hotspot-form-row__field .Polaris-TextField input:focus,
+.hotspot-form-row__field .Polaris-TextField textarea:focus {
+  border-color: var(--dash-blue) !important;
+  box-shadow: 0 0 0 3px rgba(77, 105, 250, 0.1) !important;
+  background: #ffffff !important;
+}
+
+.hotspot-form-row__action {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.hotspot-form-row__submit {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+}
+
+.hotspot-form-row__submit .dash-error {
+  font-size: 0.875rem;
+}
+
+@media (max-width: 640px) {
+  .hotspot-form-row {
+    grid-template-columns: 36px 1fr;
+    grid-template-rows: auto auto;
+    gap: 0.5rem;
+  }
+
+  .hotspot-form-row__label {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: left;
+  }
+
+  .hotspot-form-row__field {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .hotspot-form-row__action,
+  .hotspot-form-row__submit {
+    grid-column: 1 / -1;
+  }
+}
+
+.hotspot-table-row__col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  justify-content: center;
+}
+
+.hotspot-table-row__title {
+  font-weight: 500;
+  color: var(--dash-text);
+  word-break: break-word;
+}
+
+.hotspot-table-row__text {
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hotspot-table-row__sub {
+  font-size: 0.8125rem;
+  color: var(--dash-muted);
+  word-break: break-word;
+}
+
+.hotspot-table-row__label {
+  font-size: 0.875rem;
+  color: var(--dash-muted);
+  font-weight: 500;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.result-score {
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: var(--dash-blue);
+  letter-spacing: -0.02em;
+}
+
+/* ── 全局返回按钮 ─────────────────────────────────────────────── */
+.dash-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.875rem;
+  padding: 0.3rem 0.5rem 0.3rem 0.25rem;
+  background: none;
+  border: none;
+  border-radius: var(--dash-radius-sm);
+  color: var(--dash-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+  text-decoration: none;
+  font-family: inherit;
+  line-height: 1;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.dash-back-btn:hover {
+  color: var(--dash-text);
+  background: rgba(77, 105, 250, 0.06);
+}
+
+.dash-back-btn:active {
+  background: rgba(77, 105, 250, 0.1);
+}
+
+.dash-back-btn svg {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.hotspot-table-row__col--action {
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.hotspot-table-row__btn {
+  width: 100%;
+  max-width: 100%;
+}
+
+.hotspot-table-row__btn button {
+  width: 100%;
+  justify-content: center;
+}
+
+.hotspot-table-row-extra {
+  padding: 0.5rem 1.25rem 0.75rem 1.25rem;
+  padding-left: calc(40px + 1.25rem + 1.25rem);
+  font-size: 0.8125rem;
+  color: var(--dash-muted);
+  border-top: 1px solid transparent;
+}
+
+.hotspot-table-row-extra.hotspot-table-row--alt {
+  background: #f8f9ff;
+}
+
+.hotspot-table-row-extra a {
+  color: var(--dash-blue);
+  text-decoration: none;
+}
+
+.hotspot-table-row-extra a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 900px) {
+  .hotspot-table-header {
+    display: none;
+  }
+
+  .hotspot-table-row {
+    grid-template-columns: 36px 1fr;
+    grid-template-rows: auto auto auto auto;
+    gap: 0.5rem 0.75rem;
+    padding: 1rem 1rem;
+  }
+
+  .hotspot-table-row__avatar {
+    grid-row: 1 / span 4;
+    align-self: start;
+  }
+
+  .hotspot-table-row__col--title {
+    grid-column: 2;
+  }
+
+  .hotspot-table-row__col--summary {
+    grid-column: 2;
+  }
+
+  .hotspot-table-row__col--meta {
+    grid-column: 2;
+  }
+
+  .hotspot-table-row__col--action {
+    grid-column: 2;
+    width: 100%;
+  }
+
+  .hotspot-table-row-extra {
+    padding-left: 1rem;
+  }
+}
