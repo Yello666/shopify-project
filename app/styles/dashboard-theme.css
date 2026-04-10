@@ -566,3 +566,64 @@ body {
     padding-left: 1rem;
   }
 }
+
+/* ── 品牌编辑页面 ── */
+.brand-edit-form {
+  background: #ffffff;
+  border-radius: var(--dash-radius);
+  box-shadow: var(--dash-shadow);
+  border: 1px solid var(--dash-border);
+  padding: 1.5rem;
+}
+
+.brand-edit-form__row {
+  margin-bottom: 1.25rem;
+}
+
+.brand-edit-form__row:last-of-type {
+  margin-bottom: 0;
+}
+
+.brand-edit-form__label {
+  display: block;
+  font-weight: 500;
+  color: var(--dash-text);
+  margin-bottom: 0.5rem;
+  font-size: 0.9375rem;
+}
+
+.brand-edit-form__required {
+  color: #ff4d4f;
+  margin-left: 2px;
+}
+
+.brand-edit-form__footer {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--dash-border);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.brand-edit-preview {
+  background: #ffffff;
+  border-radius: var(--dash-radius);
+  box-shadow: var(--dash-shadow);
+  border: 1px solid var(--dash-border);
+  padding: 1rem;
+}
+
+/* ── 移动端适配 ── */
+@media (max-width: 640px) {
+  .brand-edit-form {
+    padding: 1rem;
+  }
+
+  .brand-edit-form__footer {
+    justify-content: stretch;
+  }
+
+  .brand-edit-form__footer .ant-btn {
+    width: 100%;
+  }
+}

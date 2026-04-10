@@ -24,7 +24,6 @@ export const loader = async ({ request }) => {
 export default function Index() {
   const navigate = useNavigate();
 
-  const [brandModalOpen, setBrandModalOpen] = useState(false);
   const [priceModalOpen, setPriceModalOpen] = useState(false);
   const [priceProducts, setPriceProducts] = useState([]);
   const [priceSelected, setPriceSelected] = useState([]);
@@ -41,13 +40,6 @@ export default function Index() {
     password: "",
     shopify_domain: "",
   });
-
-  const [brandForm, setBrandForm] = useState({
-    brandName: "",
-    description: "",
-    tone: "",
-  });
-  const [brandSubmitting, setBrandSubmitting] = useState(false);
 
   /** 当前登录用户信息 */
   const [currentUser, setCurrentUser] = useState(null);
@@ -93,13 +85,7 @@ export default function Index() {
       openAuthLogin();
       return;
     }
-    // 加载现有品牌信息
-    setBrandForm({
-      brandName: currentUser.brand?.name || "",
-      description: currentUser.brand?.core_value || "",
-      tone: currentUser.brand?.tone || "",
-    });
-    setBrandModalOpen(true);
+    navigate("/app/brand-edit");
   };
   const handleDynamicPrice = () => {
     if (!currentUser) {
@@ -169,48 +155,6 @@ export default function Index() {
       message.error(e instanceof Error ? e.message : "网络错误");
     } finally {
       setPriceSubmitting(false);
-    }
-  };
-
-  const handleBrandSubmit = async () => {
-    if (!brandForm.brandName.trim()) {
-      message.warning("请填写品牌名称");
-      return;
-    }
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) {
-      message.warning("请先登录");
-      openAuthLogin();
-      return;
-    }
-    setBrandSubmitting(true);
-    try {
-      const res = await fetch(`${MERCHANT_API_BASE}/brand-info`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name: brandForm.brandName.trim(),
-          core_value: brandForm.description.trim(),
-          mainly_sold_products: currentUser.brand?.industry || "",
-          tone: brandForm.tone.trim(),
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detail = json?.data?.message || json?.message || "保存失败";
-        message.error(detail);
-        return;
-      }
-      message.success("品牌信息保存成功");
-      setBrandModalOpen(false);
-      checkLoginStatus(token);
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : "网络错误");
-    } finally {
-      setBrandSubmitting(false);
     }
   };
 
@@ -412,60 +356,6 @@ export default function Index() {
           </div>
         </div>
       </div>
-
-      {/* 品牌信息编辑弹窗 */}
-      <Modal
-        open={brandModalOpen}
-        onCancel={() => setBrandModalOpen(false)}
-        title="编辑品牌信息"
-        okText="保存"
-        cancelText="取消"
-        okButtonProps={{ loading: brandSubmitting }}
-        onOk={handleBrandSubmit}
-      >
-        <div className="ant-form-stack">
-          <div className="ant-form-row">
-            <label className="ant-form-label" htmlFor="modal-brand-name">
-              品牌名称 <span className="ant-form-required">*</span>
-            </label>
-            <Input
-              id="modal-brand-name"
-              value={brandForm.brandName}
-              onChange={(e) =>
-                setBrandForm((f) => ({ ...f, brandName: e.target.value }))
-              }
-              placeholder="请输入品牌名称"
-            />
-          </div>
-          <div className="ant-form-row">
-            <label className="ant-form-label" htmlFor="modal-brand-desc">
-              定位描述
-            </label>
-            <Input.TextArea
-              id="modal-brand-desc"
-              value={brandForm.description}
-              onChange={(e) =>
-                setBrandForm((f) => ({ ...f, description: e.target.value }))
-              }
-              placeholder="请输入品牌定位描述"
-              rows={2}
-            />
-          </div>
-          <div className="ant-form-row">
-            <label className="ant-form-label ant-form-label--opt" htmlFor="modal-brand-tone">
-              品牌调性（选填）
-            </label>
-            <Input
-              id="modal-brand-tone"
-              value={brandForm.tone}
-              onChange={(e) =>
-                setBrandForm((f) => ({ ...f, tone: e.target.value }))
-              }
-              placeholder="如：高端奢华、年轻活力、简约自然"
-            />
-          </div>
-        </div>
-      </Modal>
 
       {/* 登录 / 注册（后端：POST /api/v1/auth/login 为 OAuth2 表单；register 为 MerchantCreate JSON） */}
       <Modal
