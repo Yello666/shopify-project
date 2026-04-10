@@ -49,6 +49,26 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/hotspot/, "/api/v1/hotspot"),
       },
+      "/api/auth": {
+        target: "https://shop-ai.xin",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/auth/, "/api/v1/auth"),
+      },
+      "/api/merchant": {
+        target: "https://shop-ai.xin",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/merchant/, "/api/v1/merchant"),
+      },
+      "/api/generate": {
+        target: "https://shop-ai.xin",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/generate/, "/api/v1/generate"),
+      },
+      "/api/content": {
+        target: "https://shop-ai.xin",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/content/, "/api/v1/content"),
+      },
     },
     fs: {
       // See https://vitejs.dev/config/server-options.html#server-fs-allow for more information

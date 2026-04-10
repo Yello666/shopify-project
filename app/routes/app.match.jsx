@@ -107,7 +107,15 @@ export default function Match() {
   };
 
   const handleReGenerate = () => {
-    alert("正在重新生成营销内容……");
+    const encodedHotspot = encodeURIComponent(JSON.stringify(hotspot));
+    const encodedMatch = encodeURIComponent(JSON.stringify({
+      brandName: form.brandName,
+      industry: form.industry,
+      tone: form.tone,
+      slogan: form.slogan,
+      ...result,
+    }));
+    navigate(`/app/generate?hotspot=${encodedHotspot}&match=${encodedMatch}`);
   };
 
   const handleBackToHotspot = () => {
@@ -220,7 +228,7 @@ export default function Match() {
                 </div>
                 <div className="hotspot-form-card__row">
                   <label className="hotspot-form-card__label" htmlFor="match-industry">
-                    行业/品类 <span className="hotspot-form-card__required">*</span>
+                    主要售卖商品 <span className="hotspot-form-card__required">*</span>
                   </label>
                   <Input
                     id="match-industry"
