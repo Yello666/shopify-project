@@ -2,8 +2,14 @@ import { redirect, Form, useLoaderData } from "react-router";
 import { login } from "../../shopify.server";
 import styles from "./styles.module.css";
 
-import Polaris from '@shopify/polaris';
-const { Card, Layout, Text, Stack, Button, Heading } = Polaris;
+import {
+  Button,
+  Card,
+  Heading,
+  Layout,
+  Stack,
+  Text,
+} from "@shopify/polaris";
 
 export const loader = async ({ request }) => {
   const url = new URL(request.url);
