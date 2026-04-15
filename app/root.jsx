@@ -1,5 +1,6 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 import { AppProvider } from "@shopify/polaris";
+import "@shopify/polaris/build/esm/styles.css";
 import "./styles/dashboard-theme.css";
 import "antd/dist/reset.css";
 
