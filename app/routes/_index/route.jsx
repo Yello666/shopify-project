@@ -1,4 +1,4 @@
-import { redirect, Form, useLoaderData } from "react-router";
+import { redirect, Form, useLoaderData, useNavigate } from "react-router";
 import { login } from "../../shopify.server";
 import styles from "./styles.module.css";
 
@@ -21,21 +21,18 @@ export const loader = async ({ request }) => {
 
 export default function App() {
   const { showForm } = useLoaderData();
+  const navigate = useNavigate();
 
-  // 模拟功能按钮点击事件（后续可对接实际接口）
   const handleBrandEdit = () => {
-    alert("进入品牌信息修改模块");
-    // 实际开发：跳转到品牌修改子页面 /app/brand-settings
+    navigate("/app/brand-edit");
   };
 
   const handleHotspotView = () => {
-    alert("查看最新热点趋势");
-    // 实际开发：跳转到热点查看子页面 /app/hotspot
+    navigate("/app/hotspot");
   };
 
   const handleMatchCalculate = () => {
-    alert("计算热点与品牌调性匹配度");
-    // 实际开发：调用匹配计算接口，展示结果
+    navigate("/app/match");
   };
 
   return (
