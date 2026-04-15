@@ -43,31 +43,13 @@ export default defineConfig({
     },
     port: Number(process.env.PORT || 3000),
     hmr: hmrConfig,
+    // 仅 shopify app dev / Vite：把同源 /api/* 转到后端 shop-ai.xin（与前端 fetch 路径一致）
+    // 生产环境由 Nginx 等做 /api/ → 上游，不经过 Vite
     proxy: {
-      "/api/hotspot": {
+      "/api": {
         target: "https://shop-ai.xin",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/hotspot/, "/api/v1/hotspot"),
-      },
-      "/api/auth": {
-        target: "https://shop-ai.xin",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/auth/, "/api/v1/auth"),
-      },
-      "/api/merchant": {
-        target: "https://shop-ai.xin",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/merchant/, "/api/v1/merchant"),
-      },
-      "/api/generate": {
-        target: "https://shop-ai.xin",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/generate/, "/api/v1/generate"),
-      },
-      "/api/content": {
-        target: "https://shop-ai.xin",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/content/, "/api/v1/content"),
+        rewrite: (path) => path.replace(/^\/api\//, "/api/v1/"),
       },
     },
     fs: {

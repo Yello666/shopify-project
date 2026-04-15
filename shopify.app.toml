@@ -2,7 +2,7 @@
 
 client_id = "3e209878da5f4b10514b91b689c955c5"
 name = "TestApp"
-application_url = "https://example.com"
+application_url = "https://shop-ai.cc"
 embedded = true
 
 [build]
@@ -25,7 +25,7 @@ api_version = "2026-04"
 scopes = "write_metaobject_definitions,write_metaobjects,write_products"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://shop-ai.cc/auth/callback" ]
 
 [product.metafields.app.demo_info]
 type = "single_line_text_field"
