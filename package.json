@@ -17,7 +17,8 @@
     "prisma": "prisma",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
-    "typecheck": "react-router typegen && tsc --noEmit"
+    "typecheck": "react-router typegen && tsc --noEmit",
+    "deploy:verify": "npm run build && test -f build/server/index.js && echo 'deploy:verify OK — build/server/index.js present'"
   },
   "type": "module",
   "engines": {
