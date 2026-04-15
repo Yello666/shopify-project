@@ -3,11 +3,9 @@ import { login } from "../../shopify.server";
 import styles from "./styles.module.css";
 
 import {
+  BlockStack,
   Button,
   Card,
-  Heading,
-  Layout,
-  Stack,
   Text,
 } from "@shopify/polaris";
 
@@ -44,7 +42,9 @@ export default function App() {
     <div className={styles.index}>
       <div className={styles.content}>
         {/* 替换默认标题为你的控制面板标题 */}
-        <Heading level="h1" className={styles.heading}>shopify商家控制面板</Heading>
+        <Text as="h1" variant="headingXl" className={styles.heading}>
+          shopify商家控制面板
+        </Text>
         <Text variant="bodyMd" className={styles.text}>
           管理品牌信息、查看热点数据、计算热点与品牌调性匹配度
         </Text>
@@ -63,56 +63,58 @@ export default function App() {
           </Form>
         )}
 
-        {/* 核心：添加你的三个功能板块（使用Polaris组件布局） */}
-        <Layout className={styles.dashboardLayout} spacing="loose">
-          {/* 板块1：修改品牌信息与定位 */}
-          <Layout.Section>
-            <Card title="修改品牌信息与定位" sectioned>
-              <Stack vertical>
+        {/* 核心：三个功能板块（Polaris v13：LegacyCard + BlockStack） */}
+        <div className={styles.dashboardLayout}>
+          <BlockStack gap="500">
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">
+                  修改品牌信息与定位
+                </Text>
                 <Text>编辑品牌名称、定位描述、品牌调性等核心信息</Text>
                 <Button
-                  primary
+                  variant="primary"
                   onClick={handleBrandEdit}
                   className={styles.dashboardButton}
                 >
                   进入编辑
                 </Button>
-              </Stack>
+              </BlockStack>
             </Card>
-          </Layout.Section>
 
-          {/* 板块2：热点查看 */}
-          <Layout.Section>
-            <Card title="热点查看" sectioned>
-              <Stack vertical>
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">
+                  热点查看
+                </Text>
                 <Text>查看最新行业热点、流量数据、用户关注趋势</Text>
                 <Button
-                  secondary
+                  variant="secondary"
                   onClick={handleHotspotView}
                   className={styles.dashboardButton}
                 >
                   查看热点
                 </Button>
-              </Stack>
+              </BlockStack>
             </Card>
-          </Layout.Section>
 
-          {/* 板块3：热点与品牌调性匹配计算 */}
-          <Layout.Section>
-            <Card title="热点与品牌调性匹配计算" sectioned>
-              <Stack vertical>
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">
+                  热点与品牌调性匹配计算
+                </Text>
                 <Text>自动计算热点与品牌调性的匹配度，生成推荐方案</Text>
                 <Button
-                  outline
+                  variant="tertiary"
                   onClick={handleMatchCalculate}
                   className={styles.dashboardButton}
                 >
                   开始计算
                 </Button>
-              </Stack>
+              </BlockStack>
             </Card>
-          </Layout.Section>
-        </Layout>
+          </BlockStack>
+        </div>
       </div>
     </div>
   );
