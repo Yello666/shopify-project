@@ -98,6 +98,14 @@ export default function Index() {
     loadPriceProducts();
     setPriceModalOpen(true);
   };
+  const handleProductsView = () => {
+    if (!currentUser) {
+      message.warning("请先登录后再查看商品");
+      openAuthLogin();
+      return;
+    }
+    navigate("/app/products");
+  };
 
   const loadPriceProducts = async () => {
     const token = localStorage.getItem(TOKEN_KEY);
@@ -352,6 +360,21 @@ export default function Index() {
             </p>
             <Button type="primary" onClick={handleDynamicPrice}>
               开始调价
+            </Button>
+          </div>
+
+          <div className="dash-feature-card dash-accent-blue">
+            <div className="dash-feature-card__head">
+              <h2 className="dash-card-title">商品管理</h2>
+              <span className="dash-icon-box" aria-hidden>
+                🛍️
+              </span>
+            </div>
+            <p className="dash-feature-card__desc">
+              查看商品列表、检查状态，并跳转到商品详情
+            </p>
+            <Button type="primary" onClick={handleProductsView}>
+              查看商品
             </Button>
           </div>
         </div>

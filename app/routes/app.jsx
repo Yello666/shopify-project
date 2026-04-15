@@ -25,9 +25,10 @@ export default function App() {
     <PolarisAppProvider i18n={polarisI18n}>
       <s-app-nav>
         <s-link href="/app">首页</s-link>
+        <s-link href="/app/brand-edit">品牌信息</s-link>
         <s-link href="/app/hotspot">热点内容</s-link>
+        <s-link href="/app/products">商品管理</s-link>
         <s-link href="/app/generate">内容生成</s-link>
-        <s-link href="/app/additional">示例页面</s-link>
       </s-app-nav>
       <div className="dash-app-background">
         <Outlet />

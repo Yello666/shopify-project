@@ -64,6 +64,24 @@ export default function BrandEdit() {
     }
   };
 
+  const requestSaveBrand = async (token, method) => {
+    const res = await fetch(`${MERCHANT_API_BASE}/brand-info`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        name: brandForm.brandName.trim(),
+        core_value: brandForm.description.trim(),
+        mainly_sold_products: currentUser?.brand?.industry || "",
+        tone: brandForm.tone.trim(),
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    return { res, json };
+  };
+
   const handleSave = async () => {
     if (!brandForm.brandName.trim()) {
       message.warning("请填写品牌名称");
@@ -77,20 +95,11 @@ export default function BrandEdit() {
     }
     setSubmitting(true);
     try {
-      const res = await fetch(`${MERCHANT_API_BASE}/brand-info`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name: brandForm.brandName.trim(),
-          core_value: brandForm.description.trim(),
-          mainly_sold_products: currentUser?.brand?.industry || "",
-          tone: brandForm.tone.trim(),
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
+      // 优先调用更新接口，若后端不支持再回退到设置接口
+      let { res, json } = await requestSaveBrand(token, "PUT");
+      if (!res.ok && [404, 405].includes(res.status)) {
+        ({ res, json } = await requestSaveBrand(token, "POST"));
+      }
       if (!res.ok) {
         const detail = json?.data?.message || json?.message || "保存失败";
         message.error(detail);
