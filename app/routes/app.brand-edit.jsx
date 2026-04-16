@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Input, message, Spin, Descriptions, Tag } from "antd";
+import { authFetch, getAccessToken } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/merchant";
-const TOKEN_KEY = "ai_decision_access_token";
 
 export const loader = async ({ request }) => {
   try {
@@ -31,22 +31,10 @@ export default function BrandEdit() {
 
   const [savedBrand, setSavedBrand] = useState(null);
 
-  useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) {
-      message.warning("请先登录");
-      navigate("/app");
-      return;
-    }
-    loadUserInfo(token);
-  }, [navigate]);
-
-  const loadUserInfo = async (token) => {
+  const loadUserInfo = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${MERCHANT_API_BASE}/info`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`${MERCHANT_API_BASE}/info`);
       if (res.ok) {
         const json = await res.json();
         const userData = json?.data || json;
@@ -57,19 +45,31 @@ export default function BrandEdit() {
           tone: userData.brand?.tone || "",
         });
       }
-    } catch {
-      // ignore
+    } catch (e) {
+      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+        message.warning("登录已过期，请重新登录");
+        navigate("/app");
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
 
-  const requestSaveBrand = async (token, method) => {
-    const res = await fetch(`${MERCHANT_API_BASE}/brand-info`, {
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      message.warning("请先登录");
+      navigate("/app");
+      return;
+    }
+    loadUserInfo();
+  }, [loadUserInfo, navigate]);
+
+  const requestSaveBrand = async (method) => {
+    const res = await authFetch(`${MERCHANT_API_BASE}/brand-info`, {
       method,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
         name: brandForm.brandName.trim(),
@@ -87,7 +87,7 @@ export default function BrandEdit() {
       message.warning("请填写品牌名称");
       return;
     }
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) {
       message.warning("请先登录");
       navigate("/app");
@@ -96,9 +96,9 @@ export default function BrandEdit() {
     setSubmitting(true);
     try {
       // 优先调用更新接口，若后端不支持再回退到设置接口
-      let { res, json } = await requestSaveBrand(token, "PUT");
+      let { res, json } = await requestSaveBrand("PUT");
       if (!res.ok && [404, 405].includes(res.status)) {
-        ({ res, json } = await requestSaveBrand(token, "POST"));
+        ({ res, json } = await requestSaveBrand("POST"));
       }
       if (!res.ok) {
         const detail = json?.data?.message || json?.message || "保存失败";
@@ -116,9 +116,14 @@ export default function BrandEdit() {
       message.success("品牌信息保存成功");
 
       // 刷新用户信息
-      loadUserInfo(token);
+      loadUserInfo();
     } catch (e) {
-      message.error(e instanceof Error ? e.message : "网络错误");
+      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+        message.warning("登录已过期，请重新登录");
+        navigate("/app");
+      } else {
+        message.error(e instanceof Error ? e.message : "网络错误");
+      }
     } finally {
       setSubmitting(false);
     }

@@ -3,9 +3,9 @@ import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Empty, Input, Space, Spin, Table, Tag, message } from "antd";
+import { authFetch, getAccessToken } from "../utils/auth-api";
 
 const PRODUCTS_API_BASE = "/api/products";
-const TOKEN_KEY = "ai_decision_access_token";
 
 export const loader = async ({ request }) => {
   try {
@@ -24,7 +24,7 @@ export default function ProductsPage() {
   const [keyword, setKeyword] = useState("");
 
   const loadProducts = async () => {
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) {
       message.warning("请先登录");
       navigate("/app");
@@ -35,9 +35,7 @@ export default function ProductsPage() {
     setError("");
 
     try {
-      const res = await fetch(`${PRODUCTS_API_BASE}?limit=50`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`${PRODUCTS_API_BASE}?limit=50`);
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = json?.data?.message || json?.message || `获取失败: ${res.status}`;
@@ -45,9 +43,14 @@ export default function ProductsPage() {
       }
       setProducts(Array.isArray(json?.data) ? json.data : []);
     } catch (e) {
-      const detail = e instanceof Error ? e.message : "网络错误";
-      setError(detail);
-      setProducts([]);
+      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+        message.warning("登录已过期，请重新登录");
+        navigate("/app");
+      } else {
+        const detail = e instanceof Error ? e.message : "网络错误";
+        setError(detail);
+        setProducts([]);
+      }
     } finally {
       setLoading(false);
     }

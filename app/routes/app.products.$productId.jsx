@@ -3,9 +3,9 @@ import { useParams, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Spin, Tag, Descriptions } from "antd";
+import { authFetch, getAccessToken } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/merchant";
-const TOKEN_KEY = "ai_decision_access_token";
 
 export const loader = async ({ request }) => {
   try {
@@ -30,15 +30,13 @@ export default function ProductDetail() {
       setLoading(false);
       return;
     }
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) {
       setError("请先登录");
       setLoading(false);
       return;
     }
-    fetch(`${MERCHANT_API_BASE.replace("/merchant", "/products")}/${pid}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    authFetch(`${MERCHANT_API_BASE.replace("/merchant", "/products")}/${pid}`)
       .then((res) => {
         if (!res.ok) throw new Error(`获取失败: ${res.status}`);
         return res.json();
@@ -48,7 +46,11 @@ export default function ProductDetail() {
         setLoading(false);
       })
       .catch((err) => {
-        setError(err.message);
+        if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
+          setError("登录已过期，请重新登录");
+        } else {
+          setError(err.message);
+        }
         setLoading(false);
       });
   }, [productId]);

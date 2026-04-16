@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Modal, Input, message, Spin, Empty } from "antd";
+import { authFetch, clearAuthTokens, saveAuthTokens } from "../utils/auth-api";
 
 /** 与 Vite 代理 `/api/auth` → 后端 `/api/v1/auth` 一致；生产环境需在同源或网关配置相同转发 */
 const AUTH_API_BASE = "/api/auth";
@@ -10,7 +11,6 @@ const MERCHANT_API_BASE = "/api/merchant";
 
 /** 存储 key */
 const TOKEN_KEY = "ai_decision_access_token";
-const REFRESH_TOKEN_KEY = "ai_decision_refresh_token";
 
 export const loader = async ({ request }) => {
   try {
@@ -48,16 +48,14 @@ export default function Index() {
   useEffect(() => {
     const storedToken = localStorage.getItem(TOKEN_KEY);
     if (storedToken) {
-      checkLoginStatus(storedToken);
+      checkLoginStatus();
     }
   }, []);
 
   /** 验证 token 是否有效，获取用户信息 */
-  const checkLoginStatus = async (token) => {
+  const checkLoginStatus = async () => {
     try {
-      const res = await fetch(`${MERCHANT_API_BASE}/info`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`${MERCHANT_API_BASE}/info`);
       if (res.ok) {
         const json = await res.json();
         const userData = json?.data || json;
@@ -65,16 +63,13 @@ export default function Index() {
       } else if (res.status === 403) {
         // 账号被禁用
         message.error("账号已被禁用，请联系管理员");
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem(REFRESH_TOKEN_KEY);
+        clearAuthTokens();
       } else {
         // 其他错误（401 等），清除本地存储
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem(REFRESH_TOKEN_KEY);
+        clearAuthTokens();
       }
     } catch {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
+      clearAuthTokens();
     }
   };
 
@@ -112,9 +107,7 @@ export default function Index() {
     if (!token) return;
     setPriceLoading(true);
     try {
-      const res = await fetch(`${MERCHANT_API_BASE.replace("/merchant", "/products")}?limit=20`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`${MERCHANT_API_BASE.replace("/merchant", "/products")}?limit=20`);
       if (res.ok) {
         const json = await res.json();
         setPriceProducts(json?.data || []);
@@ -143,11 +136,10 @@ export default function Index() {
     setPriceSubmitting(true);
     setPriceResult(null);
     try {
-      const res = await fetch(`${MERCHANT_API_BASE.replace("/merchant", "/pricing-agent")}/analyze`, {
+      const res = await authFetch(`${MERCHANT_API_BASE.replace("/merchant", "/pricing-agent")}/analyze`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ product_ids: priceSelected }),
       });
@@ -173,8 +165,7 @@ export default function Index() {
 
   /** 登出 */
   const handleLogout = () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    clearAuthTokens();
     setCurrentUser(null);
     message.success("已退出登录");
   };
@@ -210,15 +201,12 @@ export default function Index() {
         return;
       }
       if (token) {
-        localStorage.setItem(TOKEN_KEY, token);
-        if (refreshToken) {
-          localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-        }
+        saveAuthTokens({ accessToken: token, refreshToken });
         message.success("登录成功");
         setAuthModalOpen(false);
         setLoginForm({ username: "", password: "" });
         // 登录成功后获取用户信息
-        checkLoginStatus(token);
+        checkLoginStatus();
       } else {
         message.error("响应格式异常");
       }

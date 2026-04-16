@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Button, Space, Spin, Empty } from "antd";
+import { Button, Space, Spin, Empty, message } from "antd";
+import { authFetch } from "../utils/auth-api";
 
 function formatTags(tags) {
   if (!Array.isArray(tags) || tags.length === 0) return "";
@@ -106,7 +107,7 @@ export default function Hotspot() {
   const sentinelRef = useRef(null);
 
   useEffect(() => {
-    fetch("/api/hotspot/hot-trends", {
+    authFetch("/api/hotspot/hot-trends", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ platforms: ["youtube"], max_results: 5 }),
@@ -121,10 +122,15 @@ export default function Hotspot() {
         setLoading(false);
       })
       .catch((err) => {
+        if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
+          message.warning("请先登录");
+          navigate("/app");
+          return;
+        }
         setError(err.message);
         setLoading(false);
       });
-  }, []);
+  }, [navigate]);
 
   const hasItems = hotspots.length > 0;
 

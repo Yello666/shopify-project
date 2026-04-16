@@ -4,11 +4,11 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Input, Select, Upload, message, Spin, Card, Tag, Space, Divider } from "antd";
 import { UploadOutlined, VideoCameraOutlined } from "@ant-design/icons";
+import { authFetch, getAccessToken } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/merchant";
 const GENERATE_API_BASE = "/api/generate";
 const CONTENT_API_BASE = "/api/content";
-const TOKEN_KEY = "ai_decision_access_token";
 
 export const loader = async ({ request }) => {
   try {
@@ -70,12 +70,10 @@ export default function Generate() {
 
   // 加载商品列表
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
     setLoadingProducts(true);
-    fetch(`${MERCHANT_API_BASE.replace("/merchant", "/products")}?limit=20`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    authFetch(`${MERCHANT_API_BASE.replace("/merchant", "/products")}?limit=20`)
       .then((res) => res.json())
       .then((json) => {
         setProducts(json?.data || []);
@@ -88,11 +86,9 @@ export default function Generate() {
 
   // 加载品牌信息
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
-    fetch(`${MERCHANT_API_BASE}/info`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    authFetch(`${MERCHANT_API_BASE}/info`)
       .then((res) => res.json())
       .then((json) => {
         const data = json?.data || json;
@@ -108,10 +104,7 @@ export default function Generate() {
     if (!pollingTaskId) return;
     const poll = async () => {
       try {
-        const token = localStorage.getItem(TOKEN_KEY);
-        const res = await fetch(`${GENERATE_API_BASE}/video-task-status/${pollingTaskId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await authFetch(`${GENERATE_API_BASE}/video-task-status/${pollingTaskId}`);
         const json = await res.json();
         const data = json?.data || json;
         setTaskStatus(data?.status || "unknown");
@@ -122,7 +115,12 @@ export default function Generate() {
           setTaskResult({ error: data?.error?.message || "任务失败" });
           setPollingTaskId(null);
         }
-      } catch {
+      } catch (e) {
+        if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+          setTaskResult({ error: "登录已过期，请重新登录后再试" });
+          setPollingTaskId(null);
+          return;
+        }
         // 继续轮询
       }
     };
@@ -134,7 +132,7 @@ export default function Generate() {
 
   // 上传参考图
   const handleUpload = async (file) => {
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) {
       message.warning("请先登录");
       return false;
@@ -143,9 +141,8 @@ export default function Generate() {
     try {
       const formData = new FormData();
       formData.append("image", file);
-      const res = await fetch(`${CONTENT_API_BASE}/upload-reference-image`, {
+      const res = await authFetch(`${CONTENT_API_BASE}/upload-reference-image`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
       const json = await res.json();
@@ -159,7 +156,12 @@ export default function Generate() {
         message.success("图片上传成功");
       }
     } catch (e) {
-      message.error(e instanceof Error ? e.message : "上传失败");
+      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+        message.warning("登录已过期，请重新登录");
+        navigate("/app");
+      } else {
+        message.error(e instanceof Error ? e.message : "上传失败");
+      }
     } finally {
       setUploadingImage(false);
     }
@@ -181,7 +183,7 @@ export default function Generate() {
       message.warning("图生视频模式需要上传至少一张参考图");
       return;
     }
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) {
       message.warning("请先登录");
       return;
@@ -229,11 +231,10 @@ export default function Generate() {
 
     setSubmitting(true);
     try {
-      const res = await fetch(`${GENERATE_API_BASE}/trend-product-video`, {
+      const res = await authFetch(`${GENERATE_API_BASE}/trend-product-video`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });
@@ -250,7 +251,12 @@ export default function Generate() {
         message.error("未返回任务ID");
       }
     } catch (e) {
-      message.error(e instanceof Error ? e.message : "网络错误");
+      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+        message.warning("登录已过期，请重新登录");
+        navigate("/app");
+      } else {
+        message.error(e instanceof Error ? e.message : "网络错误");
+      }
     } finally {
       setSubmitting(false);
     }

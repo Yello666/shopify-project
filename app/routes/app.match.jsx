@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
- import { Button, Input, Select, Tag, Space } from "antd";
+import { Button, Input, Select, Tag, Space, message } from "antd";
+import { authFetch } from "../utils/auth-api";
 
 function formatTags(tags) {
   if (!Array.isArray(tags) || tags.length === 0) return null;
@@ -64,7 +65,7 @@ export default function Match() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("/api/hotspot/match", {
+      const res = await authFetch("/api/hotspot/match", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify([
@@ -100,7 +101,12 @@ export default function Match() {
         _raw: first,
       });
     } catch (err) {
-      setError(err.message);
+      if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
+        message.warning("请先登录");
+        navigate("/app");
+      } else {
+        setError(err.message);
+      }
     } finally {
       setSubmitting(false);
     }
