@@ -43,6 +43,15 @@ export default defineConfig({
     },
     port: Number(process.env.PORT || 3000),
     hmr: hmrConfig,
+    // 仅 shopify app dev / Vite：把同源 /api/* 转到后端 shop-ai.xin（与前端 fetch 路径一致）
+    // 生产环境由 Nginx 等做 /api/ → 上游，不经过 Vite
+    proxy: {
+      "/api": {
+        target: "https://shop-ai.xin",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\//, "/api/v1/"),
+      },
+    },
     fs: {
       // See https://vitejs.dev/config/server-options.html#server-fs-allow for more information
       allow: ["app", "node_modules"],
