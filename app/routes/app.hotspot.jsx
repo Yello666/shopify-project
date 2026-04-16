@@ -258,7 +258,8 @@ export default function Hotspot() {
 
           {reachedEnd && hotspots.length > 0 && !loadingMore && (
             <p className="dash-end-hint">
-              已加载全部 {totalPages} 页热点内容
+              到底了～
+              {/* {totalPages} 页 */}
             </p>
           )}
 

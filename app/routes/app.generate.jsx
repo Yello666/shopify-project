@@ -7,8 +7,16 @@ import { UploadOutlined, VideoCameraOutlined } from "@ant-design/icons";
 import { authFetch } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/merchant";
+const PRODUCTS_API_BASE = "/api/products";
 const GENERATE_API_BASE = "/api/generate";
 const CONTENT_API_BASE = "/api/content";
+
+function parseProductListResponse(json) {
+  if (Array.isArray(json?.data)) return json.data;
+  if (Array.isArray(json?.data?.items)) return json.data.items;
+  if (Array.isArray(json?.items)) return json.items;
+  return [];
+}
 
 export const loader = async ({ request }) => {
   try {
@@ -28,8 +36,10 @@ export default function Generate() {
   const [matchResult, setMatchResult] = useState(null);
   const [brandInfo, setBrandInfo] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedProductId, setSelectedProductId] = useState(undefined);
   const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
+  const [loadingProductDetail, setLoadingProductDetail] = useState(false);
 
   // 生成配置
   const [generationType, setGenerationType] = useState("text_to_video");
@@ -72,15 +82,29 @@ export default function Generate() {
   useEffect(() => {
     setLoadingProducts(true);
     authFetch(`${MERCHANT_API_BASE.replace("/merchant", "/products")}?limit=20`)
-      .then((res) => res.json())
-      .then((json) => {
-        setProducts(json?.data || []);
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(json?.detail || json?.message || `获取商品失败: ${res.status}`);
+        }
+        return json;
       })
-      .catch(() => {
+      .then((json) => {
+        setProducts(parseProductListResponse(json));
+      })
+      .catch((e) => {
+        if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+          message.warning("登录已过期，请重新登录");
+          navigate("/app");
+          return;
+        }
+        if (e instanceof Error && e.message) {
+          message.error(e.message);
+        }
         setProducts([]);
       })
       .finally(() => setLoadingProducts(false));
-  }, []);
+  }, [navigate]);
 
   // 加载品牌信息
   useEffect(() => {
@@ -126,6 +150,37 @@ export default function Generate() {
     return () => clearInterval(interval);
   }, [pollingTaskId]);
 
+  const loadProductDetail = async (productId, fallbackProduct = null) => {
+    if (productId == null || productId === "") {
+      setSelectedProduct(null);
+      return;
+    }
+
+    setLoadingProductDetail(true);
+    try {
+      const res = await authFetch(`${PRODUCTS_API_BASE}/${encodeURIComponent(String(productId))}`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.detail || json?.message || `获取商品详情失败: ${res.status}`);
+      }
+      setSelectedProduct(json?.data || json || fallbackProduct);
+    } catch (e) {
+      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+        message.warning("登录已过期，请重新登录");
+        navigate("/app");
+        return;
+      }
+      if (fallbackProduct) {
+        setSelectedProduct(fallbackProduct);
+      }
+      if (e instanceof Error && e.message) {
+        message.warning(`商品详情读取失败，已使用列表数据：${e.message}`);
+      }
+    } finally {
+      setLoadingProductDetail(false);
+    }
+  };
+
   // 上传参考图
   const handleUpload = async (file) => {
     setUploadingImage(true);
@@ -166,7 +221,11 @@ export default function Generate() {
 
   // 提交生成任务
   const handleSubmit = async () => {
-    if (!selectedProduct) {
+    if (loadingProductDetail) {
+      message.info("商品详情加载中，请稍候");
+      return;
+    }
+    if (!selectedProduct?.id) {
       message.warning("请选择一个商品");
       return;
     }
@@ -356,13 +415,15 @@ export default function Generate() {
                 <Select
                   id="select-product"
                   placeholder="请选择要推广的商品"
-                  value={selectedProduct ? selectedProduct.id : undefined}
+                  value={selectedProductId}
                   onChange={(id) => {
                     const p = products.find((pr) => pr.id === id);
+                    setSelectedProductId(id);
                     setSelectedProduct(p || null);
+                    loadProductDetail(id, p || null);
                   }}
                   options={productOptions}
-                  loading={loadingProducts}
+                  loading={loadingProducts || loadingProductDetail}
                   showSearch
                   filterOption={(input, option) =>
                     option.label.props.children[1]?.props?.children
@@ -484,7 +545,7 @@ export default function Generate() {
                   size="large"
                   loading={submitting || !!pollingTaskId}
                   onClick={handleSubmit}
-                  disabled={!selectedProduct || (generationType !== "text_to_video" && imageUrls.length === 0)}
+                  disabled={!selectedProduct || loadingProductDetail || (generationType !== "text_to_video" && imageUrls.length === 0)}
                   icon={<VideoCameraOutlined />}
                 >
                   {pollingTaskId ? `生成中... ${taskStatus || ""}` : "开始生成"}

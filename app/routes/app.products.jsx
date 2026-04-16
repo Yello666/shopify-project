@@ -7,6 +7,13 @@ import { authFetch } from "../utils/auth-api";
 
 const PRODUCTS_API_BASE = "/api/products";
 
+function parseProductListResponse(json) {
+  if (Array.isArray(json?.data)) return json.data;
+  if (Array.isArray(json?.data?.items)) return json.data.items;
+  if (Array.isArray(json?.items)) return json.items;
+  return [];
+}
+
 export const loader = async ({ request }) => {
   try {
     await authenticate.admin(request);
@@ -34,7 +41,7 @@ export default function ProductsPage() {
         const detail = json?.data?.message || json?.message || `获取失败: ${res.status}`;
         throw new Error(detail);
       }
-      setProducts(Array.isArray(json?.data) ? json.data : []);
+      setProducts(parseProductListResponse(json));
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
         message.warning("登录已过期，请重新登录");

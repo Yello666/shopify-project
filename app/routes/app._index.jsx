@@ -13,6 +13,13 @@ import {
 const AUTH_API_BASE = "/api/auth";
 const MERCHANT_API_BASE = "/api/merchant";
 
+function parseProductListResponse(json) {
+  if (Array.isArray(json?.data)) return json.data;
+  if (Array.isArray(json?.data?.items)) return json.data.items;
+  if (Array.isArray(json?.items)) return json.items;
+  return [];
+}
+
 export const loader = async ({ request }) => {
   try {
     await authenticate.admin(request);
@@ -106,7 +113,7 @@ export default function Index() {
       const res = await authFetch(`${MERCHANT_API_BASE.replace("/merchant", "/products")}?limit=20`);
       if (res.ok) {
         const json = await res.json();
-        setPriceProducts(json?.data || []);
+        setPriceProducts(parseProductListResponse(json));
       }
     } catch {
       // ignore
