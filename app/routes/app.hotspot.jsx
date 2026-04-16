@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Space, Spin, Empty, message } from "antd";
 import { authFetch } from "../utils/auth-api";
+
+const PAGE_SIZE = 10;
 
 function formatTags(tags) {
   if (!Array.isArray(tags) || tags.length === 0) return "";
@@ -102,55 +104,91 @@ export default function Hotspot() {
   const navigate = useNavigate();
   const [hotspots, setHotspots] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const [reachedEnd, setReachedEnd] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const sentinelRef = useRef(null);
 
-  useEffect(() => {
-    authFetch("/api/hotspot/hot-trends", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ platforms: ["youtube"], max_results: 5 }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error(`请求失败: ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        const list = Array.isArray(data) ? data : data?.data ?? [];
-        setHotspots(list);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
-          message.warning("请先登录");
-          navigate("/app");
-          return;
-        }
-        setError(err.message);
-        setLoading(false);
+  const loadHotspotPage = useCallback(async (page, append = false) => {
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+      setError(null);
+      setReachedEnd(false);
+    }
+
+    try {
+      const res = await authFetch("/api/hotspot/hot-trends", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platforms: ["youtube"],
+          page,
+          page_size: PAGE_SIZE,
+        }),
       });
+      if (!res.ok) {
+        throw new Error(`请求失败: ${res.status}`);
+      }
+      const data = await res.json();
+      const payload =
+        data?.data && typeof data.data === "object" ? data.data : data;
+      const list = Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload)
+        ? payload
+        : [];
+      const responsePage = Number(payload?.page || page);
+      const responseTotalPages = Math.max(1, Number(payload?.total_pages || 1));
+
+      setCurrentPage(responsePage);
+      setTotalPages(responseTotalPages);
+      setReachedEnd(responsePage >= responseTotalPages || list.length === 0);
+      setHotspots((prev) => (append ? [...prev, ...list] : list));
+    } catch (err) {
+      if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
+        message.warning("请先登录");
+        navigate("/app");
+        return;
+      }
+      setError(err.message || "加载失败");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
   }, [navigate]);
 
-  const hasItems = hotspots.length > 0;
+  useEffect(() => {
+    loadHotspotPage(1, false);
+  }, [loadHotspotPage]);
 
   useEffect(() => {
+    if (loading || loadingMore || error) return;
+
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) {
-          setReachedEnd(true);
-          observer.disconnect();
+        if (!entry.isIntersecting) return;
+
+        if (currentPage < totalPages) {
+          loadHotspotPage(currentPage + 1, true);
+          return;
         }
+
+        setReachedEnd(true);
+        observer.disconnect();
       },
       { threshold: 0.1 }
     );
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasItems]);
+  }, [currentPage, error, loading, loadingMore, loadHotspotPage, totalPages]);
 
   const handleGenerate = (hotspot) => {
     const encoded = encodeURIComponent(JSON.stringify(hotspot));
@@ -177,7 +215,7 @@ export default function Hotspot() {
           {error && !loading && (
             <Space direction="vertical" style={{ width: "100%" }} size="middle">
               <p className="dash-text-error">加载失败：{error}</p>
-              <Button onClick={() => window.location.reload()}>重试</Button>
+              <Button onClick={() => loadHotspotPage(1, false)}>重试</Button>
             </Space>
           )}
 
@@ -202,7 +240,7 @@ export default function Hotspot() {
               <div className="hotspot-table-body">
                 {hotspots.map((item, index) => (
                   <HotspotItem
-                    key={item.id ?? index}
+                    key={`${item.id ?? item.title ?? "hotspot"}-${index}`}
                     item={item}
                     index={index}
                     onGenerate={handleGenerate}
@@ -212,9 +250,15 @@ export default function Hotspot() {
             </div>
           )}
 
-          {reachedEnd && hotspots.length > 0 && (
+          {loadingMore && (
+            <div className="dash-page-loading" style={{ paddingTop: 12, paddingBottom: 8 }}>
+              <Spin size="small" />
+            </div>
+          )}
+
+          {reachedEnd && hotspots.length > 0 && !loadingMore && (
             <p className="dash-end-hint">
-              已经到底了哦～
+              已加载全部 {totalPages} 页热点内容
             </p>
           )}
 

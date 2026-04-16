@@ -3,14 +3,16 @@ import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Modal, Input, message, Spin, Empty } from "antd";
-import { authFetch, clearAuthTokens, saveAuthTokens } from "../utils/auth-api";
+import {
+  authFetch,
+  clearAuthTokens,
+  getAccessToken,
+  saveAuthTokens,
+} from "../utils/auth-api";
 
 /** 与 Vite 代理 `/api/auth` → 后端 `/api/v1/auth` 一致；生产环境需在同源或网关配置相同转发 */
 const AUTH_API_BASE = "/api/auth";
 const MERCHANT_API_BASE = "/api/merchant";
-
-/** 存储 key */
-const TOKEN_KEY = "ai_decision_access_token";
 
 export const loader = async ({ request }) => {
   try {
@@ -44,9 +46,9 @@ export default function Index() {
   /** 当前登录用户信息 */
   const [currentUser, setCurrentUser] = useState(null);
 
-  /** 检查是否已登录（加载时自动检查本地存储的 token） */
+  /** 检查是否已登录（加载时自动检查 cookie token） */
   useEffect(() => {
-    const storedToken = localStorage.getItem(TOKEN_KEY);
+    const storedToken = getAccessToken();
     if (storedToken) {
       checkLoginStatus();
     }
@@ -103,7 +105,7 @@ export default function Index() {
   };
 
   const loadPriceProducts = async () => {
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
     setPriceLoading(true);
     try {
@@ -128,7 +130,7 @@ export default function Index() {
       message.warning("最多只能选择 5 个商品");
       return;
     }
-    const token = localStorage.getItem(TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) {
       message.warning("请先登录");
       return;
