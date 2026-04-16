@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Spin, Tag, Descriptions } from "antd";
-import { authFetch, getAccessToken } from "../utils/auth-api";
+import { authFetch } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/merchant";
 
@@ -27,12 +27,6 @@ export default function ProductDetail() {
     const pid = Number(productId);
     if (!pid || isNaN(pid)) {
       setError("无效的商品ID");
-      setLoading(false);
-      return;
-    }
-    const token = getAccessToken();
-    if (!token) {
-      setError("请先登录");
       setLoading(false);
       return;
     }

@@ -6,7 +6,6 @@ import { Button, Modal, Input, message, Spin, Empty } from "antd";
 import {
   authFetch,
   clearAuthTokens,
-  getAccessToken,
   saveAuthTokens,
 } from "../utils/auth-api";
 
@@ -46,12 +45,9 @@ export default function Index() {
   /** 当前登录用户信息 */
   const [currentUser, setCurrentUser] = useState(null);
 
-  /** 检查是否已登录（加载时自动检查 cookie token） */
+  /** 检查是否已登录（加载时向后端探测会话） */
   useEffect(() => {
-    const storedToken = getAccessToken();
-    if (storedToken) {
-      checkLoginStatus();
-    }
+    checkLoginStatus();
   }, []);
 
   /** 验证 token 是否有效，获取用户信息 */
@@ -105,8 +101,6 @@ export default function Index() {
   };
 
   const loadPriceProducts = async () => {
-    const token = getAccessToken();
-    if (!token) return;
     setPriceLoading(true);
     try {
       const res = await authFetch(`${MERCHANT_API_BASE.replace("/merchant", "/products")}?limit=20`);
@@ -128,11 +122,6 @@ export default function Index() {
     }
     if (priceSelected.length > 5) {
       message.warning("最多只能选择 5 个商品");
-      return;
-    }
-    const token = getAccessToken();
-    if (!token) {
-      message.warning("请先登录");
       return;
     }
     setPriceSubmitting(true);

@@ -4,7 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Input, Select, Upload, message, Spin, Card, Tag, Space, Divider } from "antd";
 import { UploadOutlined, VideoCameraOutlined } from "@ant-design/icons";
-import { authFetch, getAccessToken } from "../utils/auth-api";
+import { authFetch } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/merchant";
 const GENERATE_API_BASE = "/api/generate";
@@ -70,8 +70,6 @@ export default function Generate() {
 
   // 加载商品列表
   useEffect(() => {
-    const token = getAccessToken();
-    if (!token) return;
     setLoadingProducts(true);
     authFetch(`${MERCHANT_API_BASE.replace("/merchant", "/products")}?limit=20`)
       .then((res) => res.json())
@@ -86,8 +84,6 @@ export default function Generate() {
 
   // 加载品牌信息
   useEffect(() => {
-    const token = getAccessToken();
-    if (!token) return;
     authFetch(`${MERCHANT_API_BASE}/info`)
       .then((res) => res.json())
       .then((json) => {
@@ -132,11 +128,6 @@ export default function Generate() {
 
   // 上传参考图
   const handleUpload = async (file) => {
-    const token = getAccessToken();
-    if (!token) {
-      message.warning("请先登录");
-      return false;
-    }
     setUploadingImage(true);
     try {
       const formData = new FormData();
@@ -183,12 +174,6 @@ export default function Generate() {
       message.warning("图生视频模式需要上传至少一张参考图");
       return;
     }
-    const token = getAccessToken();
-    if (!token) {
-      message.warning("请先登录");
-      return;
-    }
-
     // 组装请求数据
     const payload = {
       trendObject: {

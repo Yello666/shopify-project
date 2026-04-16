@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Input, message, Spin, Descriptions, Tag } from "antd";
-import { authFetch, getAccessToken } from "../utils/auth-api";
+import { authFetch } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/merchant";
 
@@ -56,12 +56,6 @@ export default function BrandEdit() {
   }, [navigate]);
 
   useEffect(() => {
-    const token = getAccessToken();
-    if (!token) {
-      message.warning("请先登录");
-      navigate("/app");
-      return;
-    }
     loadUserInfo();
   }, [loadUserInfo, navigate]);
 
@@ -85,12 +79,6 @@ export default function BrandEdit() {
   const handleSave = async () => {
     if (!brandForm.brandName.trim()) {
       message.warning("请填写品牌名称");
-      return;
-    }
-    const token = getAccessToken();
-    if (!token) {
-      message.warning("请先登录");
-      navigate("/app");
       return;
     }
     setSubmitting(true);

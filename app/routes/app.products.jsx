@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Empty, Input, Space, Spin, Table, Tag, message } from "antd";
-import { authFetch, getAccessToken } from "../utils/auth-api";
+import { authFetch } from "../utils/auth-api";
 
 const PRODUCTS_API_BASE = "/api/products";
 
@@ -24,13 +24,6 @@ export default function ProductsPage() {
   const [keyword, setKeyword] = useState("");
 
   const loadProducts = async () => {
-    const token = getAccessToken();
-    if (!token) {
-      message.warning("请先登录");
-      navigate("/app");
-      return;
-    }
-
     setLoading(true);
     setError("");
 

@@ -2,6 +2,7 @@ export const TOKEN_KEY = "ai_decision_access_token";
 export const REFRESH_TOKEN_KEY = "ai_decision_refresh_token";
 const ACCESS_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 2;
 const REFRESH_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const FETCH_CREDENTIALS_MODE = "include";
 
 const REFRESH_ENDPOINT = "/api/auth/refresh";
 let ongoingRefreshPromise = null;
@@ -78,14 +79,16 @@ function parseTokenResponse(json = {}) {
 }
 
 async function attemptRefreshRequest(refreshToken, contentType) {
-  if (!refreshToken) {
-    return null;
+  const hasRefreshToken = Boolean(refreshToken);
+  const hasBodyMode = Boolean(contentType);
+  if (!hasRefreshToken && hasBodyMode) {
+    return { refreshed: false, accessToken: "" };
   }
 
   let body;
-  if (contentType === "application/json") {
+  if (hasBodyMode && contentType === "application/json") {
     body = JSON.stringify({ refresh_token: refreshToken });
-  } else {
+  } else if (hasBodyMode) {
     const params = new URLSearchParams();
     params.set("refresh_token", refreshToken);
     body = params.toString();
@@ -93,44 +96,49 @@ async function attemptRefreshRequest(refreshToken, contentType) {
 
   const response = await fetch(REFRESH_ENDPOINT, {
     method: "POST",
-    headers: { "Content-Type": contentType },
+    credentials: FETCH_CREDENTIALS_MODE,
+    headers: hasBodyMode ? { "Content-Type": contentType } : undefined,
     body,
   });
 
   const json = await response.json().catch(() => ({}));
   if (!response.ok) {
-    return null;
+    return { refreshed: false, accessToken: "" };
   }
 
   const tokens = parseTokenResponse(json);
-  if (!tokens.accessToken) {
-    return null;
+  if (tokens.accessToken || tokens.refreshToken) {
+    saveAuthTokens(tokens);
   }
-  saveAuthTokens(tokens);
-  return tokens.accessToken;
+
+  return { refreshed: true, accessToken: tokens.accessToken || "" };
 }
 
 async function requestAccessTokenRefresh() {
+  // Prefer server-managed httpOnly cookie refresh.
+  const cookieRefresh = await attemptRefreshRequest("", "");
+  if (cookieRefresh.refreshed) {
+    return cookieRefresh;
+  }
+
   const refreshToken = getRefreshToken();
-  if (!refreshToken) {
-    return "";
-  }
+  if (refreshToken) {
+    const jsonRefresh = await attemptRefreshRequest(refreshToken, "application/json");
+    if (jsonRefresh.refreshed) {
+      return jsonRefresh;
+    }
 
-  const jsonToken = await attemptRefreshRequest(refreshToken, "application/json");
-  if (jsonToken) {
-    return jsonToken;
-  }
-
-  const formToken = await attemptRefreshRequest(
-    refreshToken,
-    "application/x-www-form-urlencoded"
-  );
-  if (formToken) {
-    return formToken;
+    const formRefresh = await attemptRefreshRequest(
+      refreshToken,
+      "application/x-www-form-urlencoded"
+    );
+    if (formRefresh.refreshed) {
+      return formRefresh;
+    }
   }
 
   clearAuthTokens();
-  return "";
+  return { refreshed: false, accessToken: "" };
 }
 
 async function refreshAccessTokenOnce() {
@@ -148,34 +156,63 @@ function withAuthorization(headersInit, token) {
   return headers;
 }
 
+function withCredentials(init = {}) {
+  return {
+    ...init,
+    credentials: FETCH_CREDENTIALS_MODE,
+  };
+}
+
 /**
  * Wrapper for authenticated API calls:
- * - attaches Bearer token
- * - refreshes token once on 401
- * - retries request after successful refresh
+ * - prefers cookie session (httpOnly-compatible)
+ * - falls back to Bearer token when required
+ * - refreshes once on 401, then retries
  */
 export async function authFetch(input, init = {}) {
   const token = getAccessToken();
-  if (!token) {
-    throw new Error("AUTH_REQUIRED");
-  }
-
-  const firstResponse = await fetch(input, {
-    ...init,
-    headers: withAuthorization(init.headers, token),
-  });
+  const firstResponse = await fetch(input, withCredentials(init));
 
   if (firstResponse.status !== 401) {
     return firstResponse;
   }
 
-  const renewedToken = await refreshAccessTokenOnce();
-  if (!renewedToken) {
+  if (token) {
+    const bearerResponse = await fetch(
+      input,
+      withCredentials({
+        ...init,
+        headers: withAuthorization(init.headers, token),
+      })
+    );
+    if (bearerResponse.status !== 401) {
+      return bearerResponse;
+    }
+  }
+
+  const refreshResult = await refreshAccessTokenOnce();
+  if (!refreshResult.refreshed) {
     throw new Error("AUTH_EXPIRED");
   }
 
-  return fetch(input, {
-    ...init,
-    headers: withAuthorization(init.headers, renewedToken),
-  });
+  const cookieRetry = await fetch(input, withCredentials(init));
+  if (cookieRetry.status !== 401) {
+    return cookieRetry;
+  }
+
+  const renewedToken = refreshResult.accessToken || getAccessToken();
+  if (renewedToken) {
+    const bearerRetry = await fetch(
+      input,
+      withCredentials({
+        ...init,
+        headers: withAuthorization(init.headers, renewedToken),
+      })
+    );
+    if (bearerRetry.status !== 401) {
+      return bearerRetry;
+    }
+  }
+
+  throw new Error("AUTH_EXPIRED");
 }
