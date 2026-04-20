@@ -18,7 +18,13 @@ function formatAudience(audience) {
 }
 
 // eslint-disable-next-line react/prop-types
-function HotspotItem({ item = {}, index, onGenerate }) {
+function HotspotItem({
+  item = {},
+  index,
+  itemKey,
+  checked,
+  onToggleSelect,
+}) {
   const tagsStr = formatTags(item.tags);
   const audienceStr = formatAudience(item.audience);
   const viewsLikes = [
@@ -49,7 +55,21 @@ function HotspotItem({ item = {}, index, onGenerate }) {
         className={`hotspot-table-row ${index % 2 === 1 ? "hotspot-table-row--alt" : ""}`}
         role="row"
       >
-        <div className="hotspot-table-row__avatar" aria-hidden />
+        <div
+          style={{
+            width: "28px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={() => onToggleSelect(itemKey, item)}
+            aria-label={`选择热点：${item.title || "未命名热点"}`}
+          />
+        </div>
         <div className="hotspot-table-row__col hotspot-table-row__col--title">
           <span className="hotspot-table-row__title">{item.title || "—"}</span>
           {tagsStr ? (
@@ -68,9 +88,6 @@ function HotspotItem({ item = {}, index, onGenerate }) {
         </div>
         <div className="hotspot-table-row__col hotspot-table-row__col--action">
           <span className="hotspot-table-row__text">{viewsLikes || "—"}</span>
-          <Button onClick={() => onGenerate(item)} className="hotspot-table-row__btn--full">
-            基于此热点生成营销内容
-          </Button>
         </div>
       </div>
       {hasExtra ? (
@@ -103,6 +120,7 @@ export const loader = async ({ request }) => {
 export default function Hotspot() {
   const navigate = useNavigate();
   const [hotspots, setHotspots] = useState([]);
+  const [selectedHotspots, setSelectedHotspots] = useState({});
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
@@ -190,9 +208,25 @@ export default function Hotspot() {
     return () => observer.disconnect();
   }, [currentPage, error, loading, loadingMore, loadHotspotPage, totalPages]);
 
-  const handleGenerate = (hotspot) => {
-    const encoded = encodeURIComponent(JSON.stringify(hotspot));
-    navigate(`/app/match?hotspot=${encoded}`);
+  const handleToggleSelect = (itemKey, hotspot) => {
+    setSelectedHotspots((prev) => {
+      if (prev[itemKey]) {
+        const next = { ...prev };
+        delete next[itemKey];
+        return next;
+      }
+      return { ...prev, [itemKey]: hotspot };
+    });
+  };
+
+  const handleGenerate = () => {
+    const selectedList = Object.values(selectedHotspots);
+    if (selectedList.length === 0) {
+      message.warning("请先勾选至少一个热点");
+      return;
+    }
+    const encoded = encodeURIComponent(JSON.stringify(selectedList));
+    navigate(`/app/match?hotspots=${encoded}`);
   };
 
   return (
@@ -206,6 +240,24 @@ export default function Hotspot() {
       <s-page heading="热点内容生成">
       <s-section heading="热点列表">
         <div className="dash-shell dash-section-inner">
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 12,
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ color: "var(--dash-muted)" }}>
+              已勾选 {Object.keys(selectedHotspots).length} 个热点
+            </span>
+            <Button type="primary" onClick={handleGenerate}>
+              基于所选热点生成营销内容
+            </Button>
+          </div>
+
           {loading && (
             <div className="dash-page-loading">
               <Spin size="large" />
@@ -232,20 +284,27 @@ export default function Hotspot() {
             <div className="hotspot-table">
               <div className="hotspot-table-header" role="row">
                 <span aria-hidden className="hotspot-table-header__spacer" />
+                <span>选择</span>
                 <span>标题</span>
                 <span>摘要</span>
                 <span>平台与时间</span>
-                <span>互动与操作</span>
+                <span>互动数据</span>
               </div>
               <div className="hotspot-table-body">
-                {hotspots.map((item, index) => (
+                {hotspots.map((item, index) => {
+                  // 列表可能出现无 id 项，因此使用 id + index 生成稳定 key
+                  const itemKey = `${item.id ?? item.title ?? "hotspot"}-${index}`;
+                  return (
                   <HotspotItem
-                    key={`${item.id ?? item.title ?? "hotspot"}-${index}`}
+                    key={itemKey}
                     item={item}
                     index={index}
-                    onGenerate={handleGenerate}
+                    itemKey={itemKey}
+                    checked={Boolean(selectedHotspots[itemKey])}
+                    onToggleSelect={handleToggleSelect}
                   />
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

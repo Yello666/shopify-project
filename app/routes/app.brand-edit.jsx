@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -18,6 +18,7 @@ export const loader = async ({ request }) => {
 
 export default function BrandEdit() {
   const navigate = useNavigate();
+  const hasShownBrandTipRef = useRef(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -27,37 +28,111 @@ export default function BrandEdit() {
     brandName: "",
     description: "",
     tone: "",
+    mainlySoldProducts: "",
+    audienceStr: "",
   });
 
   const [savedBrand, setSavedBrand] = useState(null);
 
   const loadUserInfo = useCallback(async () => {
-    setLoading(true);
     try {
       const res = await authFetch(`${MERCHANT_API_BASE}/info`);
       if (res.ok) {
         const json = await res.json();
         const userData = json?.data || json;
         setCurrentUser(userData);
-        setBrandForm({
-          brandName: userData.brand?.name || "",
-          description: userData.brand?.core_value || "",
-          tone: userData.brand?.tone || "",
-        });
+        if (userData?.brand) {
+          setBrandForm((prev) => ({
+            ...prev,
+            brandName: userData.brand?.name || prev.brandName,
+            description: userData.brand?.core_value || prev.description,
+            tone: userData.brand?.tone || prev.tone,
+            mainlySoldProducts:
+              userData.brand?.mainly_sold_products ||
+              userData.brand?.industry ||
+              prev.mainlySoldProducts,
+            audienceStr: Array.isArray(userData.brand?.audience)
+              ? userData.brand.audience.join(",")
+              : (typeof userData.brand?.audience === "string"
+                  ? userData.brand.audience
+                  : prev.audienceStr),
+          }));
+        }
       }
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
         message.warning("登录已过期，请重新登录");
         navigate("/app");
       }
-    } finally {
-      setLoading(false);
+    }
+  }, [navigate]);
+
+  // 页面打开时获取后端已保存的品牌信息并回填表单
+  const loadBrandInfo = useCallback(async () => {
+    try {
+      const res = await authFetch(`${MERCHANT_API_BASE}/brand-info`);
+      if (!res.ok) return;
+      const json = await res.json().catch(() => ({}));
+      const brandData =
+        json?.data?.brand ||
+        json?.data ||
+        json?.brand ||
+        null;
+      if (!brandData) return;
+      const parsedBrand = {
+        brandName: brandData.name || "",
+        description: brandData.core_value || "",
+        tone: brandData.tone || "",
+        mainlySoldProducts:
+          brandData.mainly_sold_products || brandData.industry || "",
+        audienceStr: Array.isArray(brandData.audience)
+          ? brandData.audience.join(",")
+          : (typeof brandData.audience === "string" ? brandData.audience : ""),
+      };
+      setBrandForm((prev) => ({
+        ...prev,
+        brandName: parsedBrand.brandName || prev.brandName,
+        description: parsedBrand.description || prev.description,
+        tone: parsedBrand.tone || prev.tone,
+        mainlySoldProducts: parsedBrand.mainlySoldProducts || prev.mainlySoldProducts,
+        audienceStr: parsedBrand.audienceStr || prev.audienceStr,
+      }));
+      if (!hasShownBrandTipRef.current) {
+        message.info(
+          `品牌信息已回填：品牌名称=${parsedBrand.brandName || "未填写"}；品牌介绍=${parsedBrand.description || "未填写"}；品牌风格=${parsedBrand.tone || "未填写"}；主要售卖商品=${parsedBrand.mainlySoldProducts || "未填写"}；目标受众=${parsedBrand.audienceStr || "未填写"}`,
+          5
+        );
+        hasShownBrandTipRef.current = true;
+      }
+    } catch (e) {
+      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+        message.warning("登录已过期，请重新登录");
+        navigate("/app");
+      }
     }
   }, [navigate]);
 
   useEffect(() => {
-    loadUserInfo();
-  }, [loadUserInfo, navigate]);
+    const initializePageData = async () => {
+      setLoading(true);
+      try {
+        await loadUserInfo();
+        await loadBrandInfo();
+      } finally {
+        setLoading(false);
+      }
+    };
+    initializePageData();
+  }, [loadBrandInfo, loadUserInfo]);
+
+  const parseAudienceInput = (str) => {
+    const s = String(str || "").trim();
+    if (!s) return [];
+    return s
+      .split(/[,，]/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+  };
 
   const requestSaveBrand = async (method) => {
     const res = await authFetch(`${MERCHANT_API_BASE}/brand-info`, {
@@ -68,8 +143,13 @@ export default function BrandEdit() {
       body: JSON.stringify({
         name: brandForm.brandName.trim(),
         core_value: brandForm.description.trim(),
-        mainly_sold_products: currentUser?.brand?.industry || "",
+        mainly_sold_products:
+          brandForm.mainlySoldProducts.trim() ||
+          currentUser?.brand?.mainly_sold_products ||
+          currentUser?.brand?.industry ||
+          "",
         tone: brandForm.tone.trim(),
+        audience: parseAudienceInput(brandForm.audienceStr),
       }),
     });
     const json = await res.json().catch(() => ({}));
@@ -83,11 +163,7 @@ export default function BrandEdit() {
     }
     setSubmitting(true);
     try {
-      // 优先调用更新接口，若后端不支持再回退到设置接口
-      let { res, json } = await requestSaveBrand("PUT");
-      if (!res.ok && [404, 405].includes(res.status)) {
-        ({ res, json } = await requestSaveBrand("POST"));
-      }
+      const { res, json } = await requestSaveBrand("POST");
       if (!res.ok) {
         const detail = json?.data?.message || json?.message || "保存失败";
         message.error(detail);
@@ -98,13 +174,15 @@ export default function BrandEdit() {
         name: brandForm.brandName.trim(),
         core_value: brandForm.description.trim(),
         tone: brandForm.tone.trim(),
-        industry: currentUser?.brand?.industry || "",
+        mainly_sold_products: brandForm.mainlySoldProducts.trim(),
+        audience: parseAudienceInput(brandForm.audienceStr),
       };
       setSavedBrand(saved);
       message.success("品牌信息保存成功");
 
       // 刷新用户信息
       loadUserInfo();
+      loadBrandInfo();
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
         message.warning("登录已过期，请重新登录");
@@ -166,7 +244,7 @@ export default function BrandEdit() {
               </div>
               <div className="brand-edit-form__row">
                 <label className="brand-edit-form__label" htmlFor="brand-desc">
-                  定位描述
+                  品牌介绍
                 </label>
                 <Input.TextArea
                   id="brand-desc"
@@ -174,13 +252,13 @@ export default function BrandEdit() {
                   onChange={(e) =>
                     setBrandForm((f) => ({ ...f, description: e.target.value }))
                   }
-                  placeholder="请输入品牌定位描述"
+                  placeholder="请输入品牌介绍"
                   rows={3}
                 />
               </div>
               <div className="brand-edit-form__row">
                 <label className="brand-edit-form__label" htmlFor="brand-tone">
-                  品牌调性
+                  品牌风格
                 </label>
                 <Input
                   id="brand-tone"
@@ -189,6 +267,37 @@ export default function BrandEdit() {
                     setBrandForm((f) => ({ ...f, tone: e.target.value }))
                   }
                   placeholder="如：高端奢华、年轻活力、简约自然"
+                  size="large"
+                />
+              </div>
+              <div className="brand-edit-form__row">
+                <label className="brand-edit-form__label" htmlFor="brand-products">
+                  主要售卖商品
+                </label>
+                <Input
+                  id="brand-products"
+                  value={brandForm.mainlySoldProducts}
+                  onChange={(e) =>
+                    setBrandForm((f) => ({
+                      ...f,
+                      mainlySoldProducts: e.target.value,
+                    }))
+                  }
+                  placeholder="如：女装、家居、3C数码"
+                  size="large"
+                />
+              </div>
+              <div className="brand-edit-form__row">
+                <label className="brand-edit-form__label" htmlFor="brand-audience">
+                  目标受众（选填）
+                </label>
+                <Input
+                  id="brand-audience"
+                  value={brandForm.audienceStr}
+                  onChange={(e) =>
+                    setBrandForm((f) => ({ ...f, audienceStr: e.target.value }))
+                  }
+                  placeholder="多个用英文或中文逗号分隔"
                   size="large"
                 />
               </div>
@@ -215,10 +324,10 @@ export default function BrandEdit() {
                   <Descriptions.Item label="品牌名称">
                     <strong>{savedBrand.name}</strong>
                   </Descriptions.Item>
-                  <Descriptions.Item label="定位描述">
+                  <Descriptions.Item label="品牌介绍">
                     {savedBrand.core_value || <span style={{ color: "var(--dash-muted)" }}>未填写</span>}
                   </Descriptions.Item>
-                  <Descriptions.Item label="品牌调性">
+                  <Descriptions.Item label="品牌风格">
                     {savedBrand.tone ? (
                       <Tag color="blue">{savedBrand.tone}</Tag>
                     ) : (
@@ -226,7 +335,12 @@ export default function BrandEdit() {
                     )}
                   </Descriptions.Item>
                   <Descriptions.Item label="主要售卖商品">
-                    {savedBrand.industry || <span style={{ color: "var(--dash-muted)" }}>未填写</span>}
+                    {savedBrand.mainly_sold_products || <span style={{ color: "var(--dash-muted)" }}>未填写</span>}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="目标受众（选填）">
+                    {Array.isArray(savedBrand.audience) && savedBrand.audience.length > 0
+                      ? savedBrand.audience.join("、")
+                      : <span style={{ color: "var(--dash-muted)" }}>未填写</span>}
                   </Descriptions.Item>
                 </Descriptions>
                 <div style={{ marginTop: 16, padding: "12px", background: "#f6ffed", border: "1px solid #b7eb8f", borderRadius: 8 }}>
