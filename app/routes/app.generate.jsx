@@ -2,20 +2,87 @@ import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Button, Input, Select, Upload, message, Spin, Card, Tag, Space, Divider } from "antd";
+import { Button, Input, Select, Upload, message, Card, Tag, Space, Divider } from "antd";
 import { UploadOutlined, VideoCameraOutlined } from "@ant-design/icons";
 import { authFetch } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/merchant";
 const PRODUCTS_API_BASE = "/api/products";
-const GENERATE_API_BASE = "/api/generate";
 const CONTENT_API_BASE = "/api/content";
+const VIDEO_CHAT_BOOTSTRAP_KEY = "video_chat_bootstrap_v1";
 
 function parseProductListResponse(json) {
-  if (Array.isArray(json?.data)) return json.data;
-  if (Array.isArray(json?.data?.items)) return json.data.items;
-  if (Array.isArray(json?.items)) return json.items;
-  return [];
+  const rows = Array.isArray(json?.data)
+    ? json.data
+    : Array.isArray(json?.data?.items)
+    ? json.data.items
+    : Array.isArray(json?.items)
+    ? json.items
+    : [];
+  return rows.map(normalizeProduct);
+}
+
+function normalizeProduct(raw) {
+  if (!raw || typeof raw !== "object") return raw;
+
+  // 兼容两类后端结构：
+  // 1) Shopify 原始结构（id/title/images/variants）
+  // 2) 精简结构（product_id/name/image_url/price）
+  const id = raw.id ?? raw.product_id;
+  const title = raw.title ?? raw.name ?? "";
+  const bodyHtml = raw.body_html ?? raw.description ?? "";
+  const fallbackPrice =
+    raw.variants?.[0]?.price ??
+    (raw.price != null ? String(raw.price) : undefined);
+  const imageSrc = raw.images?.[0]?.src ?? raw.image?.src ?? raw.image_url ?? "";
+  const variants = Array.isArray(raw.variants)
+    ? raw.variants
+    : fallbackPrice
+    ? [{ id: `${id || "product"}-default`, title: "默认规格", price: String(fallbackPrice) }]
+    : [];
+  const images = Array.isArray(raw.images)
+    ? raw.images
+    : imageSrc
+    ? [{ id: `${id || "product"}-image`, src: imageSrc }]
+    : [];
+
+  return {
+    ...raw,
+    id,
+    title,
+    body_html: bodyHtml,
+    variants,
+    images,
+  };
+}
+
+function toSafePrice(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toUiGenerationMode(generationType) {
+  if (generationType === "image_to_video" || generationType === "ref_to_video") {
+    return "reference_to_video";
+  }
+  return "text_to_video";
+}
+
+function toBackendGenerationMode(generationType) {
+  if (generationType === "image_to_video" || generationType === "ref_to_video") {
+    return "image_to_video";
+  }
+  return "text_to_video";
+}
+
+function toAudienceList(value) {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v || "").trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value.split(",").map((v) => v.trim()).filter(Boolean);
+  }
+  return null;
 }
 
 export const loader = async ({ request }) => {
@@ -49,11 +116,8 @@ export default function Generate() {
   const [imageUrls, setImageUrls] = useState([]);
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  // 生成状态
+  // 页面跳转状态
   const [submitting, setSubmitting] = useState(false);
-  const [taskResult, setTaskResult] = useState(null);
-  const [pollingTaskId, setPollingTaskId] = useState(null);
-  const [taskStatus, setTaskStatus] = useState(null);
 
   // 初始化：从 URL 参数解析热点和匹配结果
   useEffect(() => {
@@ -106,49 +170,18 @@ export default function Generate() {
       .finally(() => setLoadingProducts(false));
   }, [navigate]);
 
-  // 加载品牌信息
+  // 加载品牌信息（BrandObject）
   useEffect(() => {
-    authFetch(`${MERCHANT_API_BASE}/info`)
+    authFetch(`${MERCHANT_API_BASE}/brand-info`)
       .then((res) => res.json())
       .then((json) => {
         const data = json?.data || json;
-        if (data?.brand) {
-          setBrandInfo(data.brand);
+        if (data) {
+          setBrandInfo(data);
         }
       })
       .catch(() => {});
   }, []);
-
-  // 轮询任务状态
-  useEffect(() => {
-    if (!pollingTaskId) return;
-    const poll = async () => {
-      try {
-        const res = await authFetch(`${GENERATE_API_BASE}/video-task-status/${pollingTaskId}`);
-        const json = await res.json();
-        const data = json?.data || json;
-        setTaskStatus(data?.status || "unknown");
-        if (data?.status === "succeeded") {
-          setTaskResult(data);
-          setPollingTaskId(null);
-        } else if (["failed", "cancelled"].includes(data?.status)) {
-          setTaskResult({ error: data?.error?.message || "任务失败" });
-          setPollingTaskId(null);
-        }
-      } catch (e) {
-        if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-          setTaskResult({ error: "登录已过期，请重新登录后再试" });
-          setPollingTaskId(null);
-          return;
-        }
-        // 继续轮询
-      }
-    };
-
-    poll();
-    const interval = setInterval(poll, 3000);
-    return () => clearInterval(interval);
-  }, [pollingTaskId]);
 
   const loadProductDetail = async (productId, fallbackProduct = null) => {
     if (productId == null || productId === "") {
@@ -163,7 +196,7 @@ export default function Generate() {
       if (!res.ok) {
         throw new Error(json?.detail || json?.message || `获取商品详情失败: ${res.status}`);
       }
-      setSelectedProduct(json?.data || json || fallbackProduct);
+      setSelectedProduct(normalizeProduct(json?.data || json || fallbackProduct));
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
         message.warning("登录已过期，请重新登录");
@@ -220,7 +253,7 @@ export default function Generate() {
   };
 
   // 提交生成任务
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (loadingProductDetail) {
       message.info("商品详情加载中，请稍候");
       return;
@@ -233,74 +266,109 @@ export default function Generate() {
       message.warning("图生视频模式需要上传至少一张参考图");
       return;
     }
-    // 组装请求数据
-    const payload = {
-      trendObject: {
+    const productIdNum = Number(selectedProduct.id);
+    if (!Number.isFinite(productIdNum)) {
+      message.error("商品ID无效，请重新选择商品");
+      return;
+    }
+
+    const variantPayload = Array.isArray(selectedProduct.variants) && selectedProduct.variants.length > 1
+      ? selectedProduct.variants
+          .map((v) => {
+            const variantIdNum = Number(v.id ?? v.variant_id);
+            if (!Number.isFinite(variantIdNum)) return null;
+            return {
+              variant_id: variantIdNum,
+              name: v.title || v.name || "默认规格",
+              price: toSafePrice(v.price),
+              image_url: selectedProduct.images?.[0]?.src || selectedProduct.image_url || "",
+            };
+          })
+          .filter(Boolean)
+      : null;
+
+    const brandPayload = brandInfo
+      ? {
+          name: String(brandInfo.name || matchResult?.brandName || "").trim(),
+          core_value: String(brandInfo.core_value || matchResult?.slogan || "").trim(),
+          mainly_sold_products: String(
+            brandInfo.mainly_sold_products ||
+            brandInfo.industry ||
+            selectedProduct.product_type ||
+            matchResult?.industry ||
+            "通用消费品"
+          ).trim(),
+          tone: String(brandInfo.tone || matchResult?.tone || "现代、专业").trim(),
+          audience: toAudienceList(brandInfo.audience),
+        }
+      : {
+          name: String(matchResult?.brandName || "").trim(),
+          core_value: String(matchResult?.slogan || "").trim(),
+          mainly_sold_products: String(matchResult?.industry || selectedProduct.product_type || "通用消费品").trim(),
+          tone: String(matchResult?.tone || "现代、专业").trim(),
+          audience: null,
+        };
+
+    const productPayload = {
+      product_id: productIdNum,
+      name: selectedProduct.title || "",
+      description: selectedProduct.body_html || "",
+      price: toSafePrice(selectedProduct.variants?.[0]?.price),
+      image_url: selectedProduct.images?.[0]?.src || "",
+      inventory: Number.isFinite(Number(selectedProduct.inventory)) ? Number(selectedProduct.inventory) : 0,
+      variants: variantPayload,
+    };
+
+    const createPayload = {
+      trend: {
         title: hotspot?.title || "",
         summary: hotspot?.summary || hotspot?.title || "",
         tags: Array.isArray(hotspot?.tags) ? hotspot.tags : [],
         audience: Array.isArray(hotspot?.audience) ? hotspot.audience : null,
       },
-      brandObject: brandInfo
-        ? {
-            name: brandInfo.name || "",
-            core_value: brandInfo.core_value || "",
-            industry: brandInfo.industry || "",
-            tone: brandInfo.tone || "",
-            audience: brandInfo.audience ? (Array.isArray(brandInfo.audience) ? brandInfo.audience : brandInfo.audience.split(",")) : null,
-          }
-        : {
-            name: matchResult?.brandName || "",
-            core_value: matchResult?.slogan || "",
-            industry: matchResult?.industry || "",
-            tone: matchResult?.tone || "",
-            audience: null,
-          },
-      productObject: {
-        product_id: selectedProduct.id,
-        name: selectedProduct.title || "",
-        description: selectedProduct.body_html || "",
-        price: selectedProduct.variants?.[0]?.price || "0",
-        image_url: selectedProduct.images?.[0]?.src || "",
-        inventory: 0,
-        variants: null,
+      brand: brandPayload,
+      product: productPayload,
+      user_input: userPrompt.trim() || `围绕热点「${hotspot?.title || "当前热点"}」制作约 ${duration} 秒的营销视频`,
+      generation_mode: toBackendGenerationMode(generationType),
+      media_assets: generationType === "text_to_video" ? null : {
+        ref_image_urls: imageUrls,
       },
-      generation_type: generationType,
-      duration: duration,
-      ratio: ratio,
-      user_prompt: userPrompt.trim() || null,
-      image_urls: imageUrls.length > 0 ? imageUrls : null,
-      watermark: false,
+      config_params: {
+        resolution: "720p",
+        ratio,
+        language: "zh",
+        watermark: false,
+        generate_audio: true,
+      },
     };
 
     setSubmitting(true);
     try {
-      const res = await authFetch(`${GENERATE_API_BASE}/trend-product-video`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const bootstrap = {
+        source: "generate",
+        createdAt: Date.now(),
+        title: `${selectedProduct.title || "商品"} · ${hotspot?.title || "热点视频"}`,
+        createPayload,
+        videoParams: {
+          resolution: "720p",
+          ratio,
+          watermark: false,
+          generateAudio: true,
+          generationMode: toUiGenerationMode(generationType),
+          referenceUsageDescription: "",
+          responseLang: "zh",
+          firstFrameList: [],
+          lastFrameList: [],
         },
-        body: JSON.stringify(payload),
+      };
+      sessionStorage.setItem(VIDEO_CHAT_BOOTSTRAP_KEY, JSON.stringify(bootstrap));
+      navigate("/app/video-chat", {
+        state: {
+          generateBootstrap: bootstrap,
+        },
       });
-      const json = await res.json();
-      if (!res.ok) {
-        message.error(json?.detail || "提交失败");
-        return;
-      }
-      const taskId = json?.data?.id;
-      if (taskId) {
-        message.loading("任务已提交，正在生成视频...", 2);
-        setPollingTaskId(taskId);
-      } else {
-        message.error("未返回任务ID");
-      }
     } catch (e) {
-      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-        message.warning("登录已过期，请重新登录");
-        navigate("/app");
-      } else {
-        message.error(e instanceof Error ? e.message : "网络错误");
-      }
+      message.error(e instanceof Error ? e.message : "跳转失败，请重试");
     } finally {
       setSubmitting(false);
     }
@@ -543,68 +611,17 @@ export default function Generate() {
                 <Button
                   type="primary"
                   size="large"
-                  loading={submitting || !!pollingTaskId}
+                  loading={submitting}
                   onClick={handleSubmit}
                   disabled={!selectedProduct || loadingProductDetail || (generationType !== "text_to_video" && imageUrls.length === 0)}
                   icon={<VideoCameraOutlined />}
                 >
-                  {pollingTaskId ? `生成中... ${taskStatus || ""}` : "开始生成"}
+                  开始生成
                 </Button>
               </div>
             </div>
           </div>
         </s-section>
-
-        {/* 生成结果 */}
-        {taskResult && (
-          <s-section heading="生成结果">
-            <div className="dash-shell dash-section-inner">
-              {taskResult.error ? (
-                <Card size="small" style={{ background: "#fff2f0", border: "1px solid #ffccc7" }}>
-                  <div style={{ color: "#ff4d4f" }}>
-                    <strong>生成失败：</strong>
-                    {taskResult.error}
-                  </div>
-                </Card>
-              ) : taskResult.content?.video_url ? (
-                <Card size="small">
-                  <div style={{ marginBottom: 12 }}>
-                    <Tag color="green">生成成功</Tag>
-                    <span style={{ color: "#666", marginLeft: 8 }}>视频地址（有效期 24 小时，请及时保存）</span>
-                  </div>
-                  <video
-                    controls
-                    src={taskResult.content.video_url}
-                    style={{ width: "100%", maxWidth: 640, borderRadius: 8 }}
-                  >
-                    <track kind="captions" src="" default />
-                  </video>
-                  <div style={{ marginTop: 12 }}>
-                    <a href={taskResult.content.video_url} target="_blank" rel="noopener noreferrer">
-                      <Button>在新窗口打开</Button>
-                    </a>
-                    <Button style={{ marginLeft: 8 }} onClick={() => setTaskResult(null)}>
-                      重新生成
-                    </Button>
-                  </div>
-                </Card>
-              ) : pollingTaskId ? (
-                <Card size="small">
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <Spin size="small" />
-                    <div>
-                      <div style={{ fontWeight: 600 }}>视频生成中，请稍候...</div>
-                      <div style={{ color: "#666", fontSize: 13 }}>
-                        当前状态：<Tag>{taskStatus}</Tag>
-                        <span style={{ marginLeft: 8 }}>预计需要 1~3 分钟</span>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              ) : null}
-            </div>
-          </s-section>
-        )}
       </s-page>
     </>
   );

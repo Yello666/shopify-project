@@ -49,6 +49,7 @@ export default defineConfig({
       "/api": {
         target: "https://shop-ai.xin",
         changeOrigin: true,
+        ws: true,
         rewrite: (path) => path.replace(/^\/api\//, "/api/v1/"),
       },
     },

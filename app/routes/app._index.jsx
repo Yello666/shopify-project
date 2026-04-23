@@ -106,6 +106,7 @@ export default function Index() {
     }
     navigate("/app/products");
   };
+  const handleVideoChat = () => navigate("/app/video-chat");
 
   const loadPriceProducts = async () => {
     setPriceLoading(true);
@@ -361,6 +362,21 @@ export default function Index() {
             </p>
             <Button type="primary" onClick={handleProductsView}>
               查看商品
+            </Button>
+          </div>
+
+          <div className="dash-feature-card dash-accent-violet">
+            <div className="dash-feature-card__head">
+              <h2 className="dash-card-title">视频生成</h2>
+              <span className="dash-icon-box" aria-hidden>
+                🎬
+              </span>
+            </div>
+            <p className="dash-feature-card__desc">
+              对话式描述需求，生成营销短视频（侧栏任务与历史、底部工具栏）
+            </p>
+            <Button type="primary" onClick={handleVideoChat}>
+              进入视频生成
             </Button>
           </div>
         </div>

@@ -7,6 +7,39 @@ import { authFetch } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/merchant";
 
+function normalizeProduct(raw) {
+  if (!raw || typeof raw !== "object") return raw;
+
+  const id = raw.id ?? raw.product_id;
+  const title = raw.title ?? raw.name ?? "";
+  const bodyHtml = raw.body_html ?? raw.description ?? "";
+  const imageSrc = raw.images?.[0]?.src ?? raw.image?.src ?? raw.image_url ?? "";
+  const variants = Array.isArray(raw.variants)
+    ? raw.variants
+    : raw.price != null
+    ? [{ id: `${id || "product"}-default`, title: "默认规格", price: String(raw.price) }]
+    : [];
+  const images = Array.isArray(raw.images)
+    ? raw.images
+    : imageSrc
+    ? [{ id: `${id || "product"}-image`, src: imageSrc }]
+    : [];
+
+  return {
+    ...raw,
+    id,
+    title,
+    body_html: bodyHtml,
+    variants,
+    images,
+    image: raw.image ?? (imageSrc ? { src: imageSrc } : undefined),
+    vendor: raw.vendor ?? "",
+    product_type: raw.product_type ?? "",
+    status: raw.status ?? "",
+    tags: raw.tags ?? "",
+  };
+}
+
 export const loader = async ({ request }) => {
   try {
     await authenticate.admin(request);
@@ -36,7 +69,7 @@ export default function ProductDetail() {
         return res.json();
       })
       .then((json) => {
-        setProduct(json?.data || json);
+        setProduct(normalizeProduct(json?.data || json));
         setLoading(false);
       })
       .catch((err) => {

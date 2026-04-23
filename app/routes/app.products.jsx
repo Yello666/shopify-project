@@ -8,10 +8,38 @@ import { authFetch } from "../utils/auth-api";
 const PRODUCTS_API_BASE = "/api/products";
 
 function parseProductListResponse(json) {
-  if (Array.isArray(json?.data)) return json.data;
-  if (Array.isArray(json?.data?.items)) return json.data.items;
-  if (Array.isArray(json?.items)) return json.items;
-  return [];
+  const rows = Array.isArray(json?.data)
+    ? json.data
+    : Array.isArray(json?.data?.items)
+    ? json.data.items
+    : Array.isArray(json?.items)
+    ? json.items
+    : [];
+  return rows.map(normalizeProduct);
+}
+
+function normalizeProduct(raw) {
+  if (!raw || typeof raw !== "object") return raw;
+  const id = raw.id ?? raw.product_id;
+  const title = raw.title ?? raw.name ?? "";
+  const fallbackPrice =
+    raw.variants?.[0]?.price ??
+    (raw.price != null ? String(raw.price) : undefined);
+  const variants = Array.isArray(raw.variants)
+    ? raw.variants
+    : fallbackPrice
+    ? [{ id: `${id || "product"}-default`, price: String(fallbackPrice) }]
+    : [];
+
+  return {
+    ...raw,
+    id,
+    title,
+    variants,
+    vendor: raw.vendor ?? "",
+    product_type: raw.product_type ?? "",
+    status: raw.status ?? "",
+  };
 }
 
 export const loader = async ({ request }) => {

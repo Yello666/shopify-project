@@ -118,6 +118,11 @@ body {
   color: #2eb8d4;
 }
 
+.dash-accent-violet .dash-icon-box {
+  background: rgba(108, 93, 211, 0.16);
+  color: var(--dash-purple);
+}
+
 .dash-feature-card__desc {
   margin: 0;
   color: var(--dash-muted);
