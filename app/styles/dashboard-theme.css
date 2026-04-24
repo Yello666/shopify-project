@@ -361,9 +361,21 @@ body {
   border-bottom: 1px solid var(--dash-border);
 }
 
-.hotspot-table-header__spacer {
-  width: 36px;
-  justify-self: start;
+/* 表头与 body 同为 5 列，避免多出一个格子导致换行、错位 */
+.hotspot-table-header > span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hotspot-table-header > span:first-child {
+  justify-self: center;
+  text-align: center;
+}
+
+.hotspot-table-row > .hotspot-table-row__select-cell {
+  justify-self: center;
 }
 
 .hotspot-table-body {
@@ -422,6 +434,46 @@ body {
   word-break: break-word;
 }
 
+/* 营销风险：与后端 RiskEnum（RED_LINE / YELLOW_OPPORTUNITY / GREEN_SAFE）对应 */
+.hotspot-risk-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+  max-width: 100%;
+}
+
+.hotspot-risk-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+.hotspot-risk-dot--green {
+  background: #1d9a6c;
+}
+
+.hotspot-risk-dot--yellow {
+  background: #e09a2e;
+}
+
+.hotspot-risk-dot--red {
+  background: #c4351a;
+}
+
+.hotspot-risk-dot--unknown {
+  background: #8f9bb3;
+}
+
+.hotspot-risk-label {
+  font-size: 0.8125rem;
+  color: var(--dash-muted);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 .hotspot-table-row__col--action {
   align-items: flex-start;
   gap: 0.5rem;
@@ -452,6 +504,71 @@ body {
 
 .hotspot-table-row-extra a:hover {
   text-decoration: underline;
+}
+
+.hotspot-match-score {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.hotspot-match-score--none {
+  background: rgba(143, 155, 179, 0.16);
+  color: var(--dash-muted);
+}
+
+.hotspot-match-score--low {
+  background: rgba(215, 44, 13, 0.12);
+  color: #c4351a;
+}
+
+.hotspot-match-score--mid {
+  background: rgba(255, 181, 71, 0.22);
+  color: #c77a0a;
+}
+
+.hotspot-match-score--good {
+  background: rgba(77, 105, 250, 0.14);
+  color: var(--dash-blue);
+}
+
+.hotspot-match-score--high {
+  background: rgba(46, 184, 130, 0.16);
+  color: #1d9a6c;
+}
+
+.hotspot-table-row-extra--recommend {
+  border-top: 1px dashed rgba(77, 105, 250, 0.18);
+  padding-left: 1.25rem;
+}
+
+.hotspot-recommend-layout {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: start;
+  gap: 0.25rem 1.25rem;
+}
+
+.hotspot-recommend-checkbox {
+  margin-top: 0.12rem;
+  justify-self: center;
+}
+
+.hotspot-recommend-grid {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.hotspot-recommend-grid p {
+  margin: 0;
+  line-height: 1.45;
 }
 
 .result-score {

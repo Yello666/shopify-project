@@ -47,7 +47,9 @@ export default defineConfig({
     // 生产环境由 Nginx 等做 /api/ → 上游，不经过 Vite
     proxy: {
       "/api": {
-        target: "https://shop-ai.xin",
+        //选择本地开发环境和线上环境
+       target: "https://shop-ai.xin",
+       //target: "http://localhost:8000",
         changeOrigin: true,
         ws: true,
         rewrite: (path) => path.replace(/^\/api\//, "/api/v1/"),
