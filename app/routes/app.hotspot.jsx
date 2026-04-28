@@ -6,7 +6,7 @@ import { Button, Space, Spin, Empty, message, Modal, InputNumber, Switch, Select
 import { authFetch } from "../utils/auth-api";
 
 const PAGE_SIZE = 10;
-const DEFAULT_MIN_COMPATIBILITY_SCORE = 40;
+const DEFAULT_MIN_COMPATIBILITY_SCORE = 60;
 const DEFAULT_SCHEDULE_STATE = {
   configured: false,
   id: null,
@@ -30,6 +30,11 @@ const SCHEDULE_MODE_OPTIONS = [
 
 function pickResponseData(json) {
   return json?.data && typeof json.data === "object" ? json.data : json;
+}
+
+function normalizeMinCompatibilityScore(raw, fallback = DEFAULT_MIN_COMPATIBILITY_SCORE) {
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 // 根据 GET /recommend-email/schedule 返回的锚点与间隔，在打开页面时静态推算「下一次可开始尝试调度」的参考时间（非任务完成时间）
@@ -83,7 +88,7 @@ const HOTSPOT_PLACEHOLDER_NO_MORE_INFO = "暂无更多信息，建议前往平�
 const RISK_CATEGORY_DISPLAY = {
   RED_LINE: {
     dotClass: "hotspot-risk-dot--red",
-    labelZh: "敏感或违规内容，不宜用于营销",
+    labelZh: "敏感或违规内容",
   },
   YELLOW_OPPORTUNITY: {
     dotClass: "hotspot-risk-dot--yellow",
@@ -91,7 +96,7 @@ const RISK_CATEGORY_DISPLAY = {
   },
   GREEN_SAFE: {
     dotClass: "hotspot-risk-dot--green",
-    labelZh: "低风险，可结合品牌做常规营销",
+    labelZh: "低风险",
   },
 };
 
@@ -208,16 +213,11 @@ function HotspotItem({
   const hideOriginalLink =
     Boolean(warningText) && warningText.includes(HOTSPOT_PLACEHOLDER_NO_MORE_INFO);
 
-  const extraParts = [];
-  if (item.warning_message) {
-    extraParts.push(item.warning_message);
-  }
+  const warningLine = typeof item.warning_message === "string" ? item.warning_message.trim() : "";
   const hasSentimentScore = item.sentiment_score != null && item.sentiment_score !== 0;
-  if (audienceStr) {
-    extraParts.push(`受众：${audienceStr}`);
-  }
+  const audienceLine = audienceStr ? `受众：${audienceStr}` : "";
   const showOriginalLink = Boolean(item.jump_url) && !hideOriginalLink;
-  const hasExtra = extraParts.length > 0 || hasSentimentScore || showOriginalLink;
+  const hasExtra = Boolean(warningLine) || Boolean(audienceLine) || hasSentimentScore || showOriginalLink;
 
   return (
     <div className="hotspot-table-body-group">
@@ -288,7 +288,8 @@ function HotspotItem({
           <div className="hotspot-recommend-layout">
             <input
               className="hotspot-recommend-checkbox"
-              type="checkbox"
+              type="radio"
+              name="hotspot-recommend-radio"
               checked={checked}
               onChange={() => onToggleSelect(itemKey, item)}
               aria-label={`选择热点：${item.title || "未命名热点"}`}
@@ -312,11 +313,14 @@ function HotspotItem({
       ) : null}
       {hasExtra ? (
         <div
-          className={`hotspot-table-row-extra ${index % 2 === 1 ? "hotspot-table-row--alt" : ""}`}
+          className={`hotspot-table-row-extra hotspot-table-row-extra--details ${
+            index % 2 === 1 ? "hotspot-table-row--alt" : ""
+          }`}
         >
-          {extraParts.length > 0 ? <div>{extraParts.join(" ｜ ")}</div> : null}
+          {warningLine ? <div>{warningLine}</div> : null}
+          {audienceLine ? <div style={{ marginTop: warningLine ? "0.35rem" : 0 }}>{audienceLine}</div> : null}
           {hasSentimentScore ? (
-            <div style={{ marginTop: extraParts.length ? "0.35rem" : 0 }}>
+            <div style={{ marginTop: warningLine || audienceLine ? "0.35rem" : 0 }}>
               <span>情感分：{item.sentiment_score}</span>
               <button
                 type="button"
@@ -349,7 +353,7 @@ function HotspotItem({
             </div>
           ) : null}
           {showOriginalLink ? (
-            <div style={{ marginTop: extraParts.length || hasSentimentScore ? "0.35rem" : 0 }}>
+            <div style={{ marginTop: warningLine || audienceLine || hasSentimentScore ? "0.35rem" : 0 }}>
               <a href={item.jump_url} target="_blank" rel="noopener noreferrer">
                 查看原文链接
               </a>
@@ -470,7 +474,7 @@ export default function Hotspot() {
       setScheduleDraft({
         is_enabled: Boolean(data.is_enabled),
         mode: data.mode || "interval_from_now",
-        min_compatibility_score: Number(data.min_compatibility_score) || DEFAULT_MIN_COMPATIBILITY_SCORE,
+        min_compatibility_score: normalizeMinCompatibilityScore(data.min_compatibility_score),
         send_hour: Number(data.send_hour ?? DEFAULT_SCHEDULE_STATE.send_hour),
         send_minute: Number(data.send_minute ?? DEFAULT_SCHEDULE_STATE.send_minute),
         timezone: data.timezone || DEFAULT_SCHEDULE_STATE.timezone,
@@ -530,7 +534,7 @@ export default function Hotspot() {
     setScheduleDraft({
       is_enabled: Boolean(scheduleState.is_enabled),
       mode: scheduleState.mode || "interval_from_now",
-      min_compatibility_score: Number(scheduleState.min_compatibility_score) || DEFAULT_MIN_COMPATIBILITY_SCORE,
+      min_compatibility_score: normalizeMinCompatibilityScore(scheduleState.min_compatibility_score),
       send_hour: Number(scheduleState.send_hour ?? DEFAULT_SCHEDULE_STATE.send_hour),
       send_minute: Number(scheduleState.send_minute ?? DEFAULT_SCHEDULE_STATE.send_minute),
       timezone: scheduleState.timezone || DEFAULT_SCHEDULE_STATE.timezone,
@@ -541,13 +545,18 @@ export default function Hotspot() {
 
   // 调用 POST /hotspot/recommend，用返回列表替换当前热点并进入推荐展开视图（纯服务端筛选）
   const handleStartRecommend = async () => {
+    const minScore = Number(recommendMinScore);
+    if (!Number.isFinite(minScore)) {
+      message.warning("请先填写最低契合度分数");
+      return;
+    }
     setRecommendSubmitting(true);
     try {
       const res = await authFetch("/api/hotspot/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          min_compatibility_score: recommendMinScore,
+          min_compatibility_score: minScore,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -568,7 +577,7 @@ export default function Hotspot() {
       setScoreSortOrder(null);
       setRecommendModalOpen(false);
       const appliedMin = Number(envelope?.min_compatibility_score);
-      if (!Number.isNaN(appliedMin)) {
+      if (Number.isFinite(appliedMin)) {
         setRecommendMinScore(appliedMin);
       }
       message.success(
@@ -628,14 +637,14 @@ export default function Hotspot() {
       setScheduleDraft({
         is_enabled: Boolean(saved.is_enabled),
         mode: saved.mode || "interval_from_now",
-        min_compatibility_score: Number(saved.min_compatibility_score) || DEFAULT_MIN_COMPATIBILITY_SCORE,
+        min_compatibility_score: normalizeMinCompatibilityScore(saved.min_compatibility_score),
         send_hour: Number(saved.send_hour ?? DEFAULT_SCHEDULE_STATE.send_hour),
         send_minute: Number(saved.send_minute ?? DEFAULT_SCHEDULE_STATE.send_minute),
         timezone: saved.timezone || DEFAULT_SCHEDULE_STATE.timezone,
         interval_hours: Number(saved.interval_hours) || 24,
       });
       setScheduleModalOpen(false);
-      setRecommendMinScore(Number(saved.min_compatibility_score) || DEFAULT_MIN_COMPATIBILITY_SCORE);
+      setRecommendMinScore(normalizeMinCompatibilityScore(saved.min_compatibility_score));
       message.success(saved.is_enabled ? "已开启定时推荐任务" : "已关闭定时推荐任务");
     } catch (err) {
       if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
@@ -650,14 +659,20 @@ export default function Hotspot() {
   };
 
   const handleToggleSelect = (itemKey, hotspot) => {
-    setSelectedHotspots((prev) => {
-      if (prev[itemKey]) {
-        const next = { ...prev };
-        delete next[itemKey];
-        return next;
-      }
-      return { ...prev, [itemKey]: hotspot };
-    });
+    if (recommendationMode) {
+      setSelectedHotspots((prev) =>
+        prev[itemKey] ? {} : { [itemKey]: hotspot },
+      );
+    } else {
+      setSelectedHotspots((prev) => {
+        if (prev[itemKey]) {
+          const next = { ...prev };
+          delete next[itemKey];
+          return next;
+        }
+        return { ...prev, [itemKey]: hotspot };
+      });
+    }
   };
 
   // 按匹配分对当前 hotspots 做纯前端排序展示；未选择排序时与原数组顺序一致
@@ -690,11 +705,17 @@ export default function Hotspot() {
   const handleGenerate = () => {
     const selectedList = Object.values(selectedHotspots);
     if (selectedList.length === 0) {
-      message.warning("请先勾选至少一个热点");
+      message.warning(recommendationMode ? "请先选择一个热点" : "请先勾选至少一个热点");
       return;
     }
-    const encoded = encodeURIComponent(JSON.stringify(selectedList));
-    navigate(`/app/match?hotspots=${encoded}`);
+    if (recommendationMode) {
+      const hotspot = selectedList[0];
+      const encoded = encodeURIComponent(JSON.stringify(hotspot));
+      navigate(`/app/generate?hotspot=${encoded}`);
+    } else {
+      const encoded = encodeURIComponent(JSON.stringify(selectedList));
+      navigate(`/app/match?hotspots=${encoded}`);
+    }
   };
 
   const scheduleNextHint = useMemo(
@@ -848,11 +869,7 @@ export default function Hotspot() {
                 max={100}
                 step={1}
                 value={recommendMinScore}
-                onChange={(v) =>
-                  setRecommendMinScore(
-                    v == null || Number.isNaN(Number(v)) ? DEFAULT_MIN_COMPATIBILITY_SCORE : Number(v),
-                  )
-                }
+                onChange={(v) => setRecommendMinScore(v == null ? null : Number(v))}
                 style={{ width: "100%" }}
               />
             </div>

@@ -421,11 +421,6 @@ body {
 
 .hotspot-table-row__text {
   word-break: break-word;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 .hotspot-table-row__sub {
@@ -491,6 +486,10 @@ body {
   font-size: 0.8125rem;
   color: var(--dash-muted);
   border-top: 1px solid transparent;
+}
+
+.hotspot-table-row-extra--details {
+  padding-top: 0;
 }
 
 .hotspot-table-row-extra.hotspot-table-row--alt {
