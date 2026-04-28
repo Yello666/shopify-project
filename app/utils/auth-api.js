@@ -15,6 +15,36 @@ function isSecureContext() {
   return typeof window !== "undefined" && window.location.protocol === "https:";
 }
 
+function readLocalStorage(name) {
+  if (!canUseDocument()) {
+    return "";
+  }
+  try {
+    return localStorage.getItem(name) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeLocalStorage(name, value) {
+  if (!canUseDocument()) {
+    return;
+  }
+  try {
+    if (value) {
+      localStorage.setItem(name, value);
+    } else {
+      localStorage.removeItem(name);
+    }
+  } catch {
+    // Quota / private mode — cookie path may still work
+  }
+}
+
+function readStored(name) {
+  return readCookie(name) || readLocalStorage(name);
+}
+
 function readCookie(name) {
   if (!canUseDocument()) {
     return "";
@@ -40,6 +70,15 @@ function writeCookie(name, value, maxAgeSeconds) {
   )}; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Lax${secureAttr}`;
 }
 
+/** Persist token in cookie (preferred for same-origin requests) and localStorage (fallback / large JWT). */
+function writeStoredToken(name, value, maxAgeSeconds) {
+  if (!value) {
+    return;
+  }
+  writeCookie(name, value, maxAgeSeconds);
+  writeLocalStorage(name, value);
+}
+
 function removeCookie(name) {
   if (!canUseDocument()) {
     return;
@@ -51,30 +90,52 @@ function removeCookie(name) {
 }
 
 export function getAccessToken() {
-  return readCookie(TOKEN_KEY);
+  return readStored(TOKEN_KEY);
 }
 
 export function getRefreshToken() {
-  return readCookie(REFRESH_TOKEN_KEY);
+  return readStored(REFRESH_TOKEN_KEY);
 }
 
 export function saveAuthTokens({ accessToken, refreshToken }) {
   if (accessToken) {
-    writeCookie(TOKEN_KEY, accessToken, ACCESS_TOKEN_MAX_AGE_SECONDS);
+    writeStoredToken(TOKEN_KEY, accessToken, ACCESS_TOKEN_MAX_AGE_SECONDS);
   }
   if (refreshToken) {
-    writeCookie(REFRESH_TOKEN_KEY, refreshToken, REFRESH_TOKEN_MAX_AGE_SECONDS);
+    writeStoredToken(
+      REFRESH_TOKEN_KEY,
+      refreshToken,
+      REFRESH_TOKEN_MAX_AGE_SECONDS
+    );
   }
 }
 
 export function clearAuthTokens() {
   removeCookie(TOKEN_KEY);
   removeCookie(REFRESH_TOKEN_KEY);
+  writeLocalStorage(TOKEN_KEY, "");
+  writeLocalStorage(REFRESH_TOKEN_KEY, "");
 }
 
-function parseTokenResponse(json = {}) {
-  const accessToken = json?.data?.access_token || json?.access_token || "";
-  const refreshToken = json?.data?.refresh_token || json?.refresh_token || "";
+export function parseTokenResponse(json = {}) {
+  const data = json?.data || {};
+  const tokenContainer = data?.token || data?.tokens || json?.token || json?.tokens || {};
+  const accessToken =
+    data?.access_token ||
+    data?.accessToken ||
+    tokenContainer?.access_token ||
+    tokenContainer?.accessToken ||
+    json?.access_token ||
+    json?.accessToken ||
+    "";
+  const refreshToken =
+    data?.refresh_token ||
+    data?.refreshToken ||
+    tokenContainer?.refresh_token ||
+    tokenContainer?.refreshToken ||
+    json?.refresh_token ||
+    json?.refreshToken ||
+    "";
   return { accessToken, refreshToken };
 }
 
