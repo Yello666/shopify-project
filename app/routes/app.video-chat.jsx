@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router";
 import "../styles/video-chat.css";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { authFetch, saveAuthTokens, clearAuthTokens } from "../utils/auth-api";
+import { authFetch, clearAuthTokens } from "../utils/auth-api";
 import { Button, Input, message as antMessage, Modal, Select, Switch, Radio, Upload } from "antd";
 import {
   MenuFoldOutlined,
@@ -603,18 +603,29 @@ export default function VideoChatPage() {
     const checkLoginStatus = async () => {
       try {
         const res = await authFetch(`${MERCHANT_API_BASE}/info`);
-        if (!res.ok) {
+        if (res.ok) {
+          const json = await res.json().catch(() => ({}));
+          if (!disposed) setCurrentUser(json?.data || json || null);
+        } else if (res.status === 401 || res.status === 403) {
           clearAuthTokens();
-          antMessage.warning("请先登录后再使用视频生成功能");
+          antMessage.warning(
+            res.status === 403
+              ? "账号不可用，请重新登录"
+              : "请先登录后再使用视频生成功能"
+          );
           navigate("/app");
-          return;
+        } else {
+          antMessage.error("暂时无法验证登录，请稍后重试");
+          if (!disposed) setCurrentUser(null);
         }
-        const json = await res.json().catch(() => ({}));
-        if (!disposed) setCurrentUser(json?.data || json || null);
-      } catch {
-        clearAuthTokens();
-        antMessage.warning("登录状态失效，请重新登录");
-        navigate("/app");
+      } catch (e) {
+        if (e instanceof Error && e.message === "AUTH_EXPIRED") {
+          clearAuthTokens();
+          antMessage.warning("登录状态失效，请重新登录");
+          navigate("/app");
+        } else {
+          antMessage.error("网络异常，请稍后重试");
+        }
       } finally {
         if (!disposed) setAuthChecking(false);
       }

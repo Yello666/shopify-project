@@ -1,7 +1,5 @@
 export const TOKEN_KEY = "ai_decision_access_token";
 export const REFRESH_TOKEN_KEY = "ai_decision_refresh_token";
-const TOKEN_KEY_STORAGE = "ai_decision_access_token_storage";
-const REFRESH_TOKEN_KEY_STORAGE = "ai_decision_refresh_token_storage";
 const ACCESS_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 2;
 const REFRESH_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const FETCH_CREDENTIALS_MODE = "include";
@@ -13,12 +11,38 @@ function canUseDocument() {
   return typeof document !== "undefined";
 }
 
-function canUseLocalStorage() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-}
-
 function isSecureContext() {
   return typeof window !== "undefined" && window.location.protocol === "https:";
+}
+
+function readLocalStorage(name) {
+  if (!canUseDocument()) {
+    return "";
+  }
+  try {
+    return localStorage.getItem(name) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeLocalStorage(name, value) {
+  if (!canUseDocument()) {
+    return;
+  }
+  try {
+    if (value) {
+      localStorage.setItem(name, value);
+    } else {
+      localStorage.removeItem(name);
+    }
+  } catch {
+    // Quota / private mode — cookie path may still work
+  }
+}
+
+function readStored(name) {
+  return readCookie(name) || readLocalStorage(name);
 }
 
 function readCookie(name) {
@@ -46,6 +70,15 @@ function writeCookie(name, value, maxAgeSeconds) {
   )}; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Lax${secureAttr}`;
 }
 
+/** Persist token in cookie (preferred for same-origin requests) and localStorage (fallback / large JWT). */
+function writeStoredToken(name, value, maxAgeSeconds) {
+  if (!value) {
+    return;
+  }
+  writeCookie(name, value, maxAgeSeconds);
+  writeLocalStorage(name, value);
+}
+
 function removeCookie(name) {
   if (!canUseDocument()) {
     return;
@@ -56,66 +89,53 @@ function removeCookie(name) {
   )}=; Path=/; Max-Age=0; SameSite=Lax${secureAttr}`;
 }
 
-function readStorage(key) {
-  if (!canUseLocalStorage()) return "";
-  try {
-    return window.localStorage.getItem(key) || "";
-  } catch {
-    return "";
-  }
-}
-
-function writeStorage(key, value) {
-  if (!canUseLocalStorage()) return;
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // ignore storage failures (private mode/quota/etc.)
-  }
-}
-
-function removeStorage(key) {
-  if (!canUseLocalStorage()) return;
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    // ignore storage failures
-  }
-}
-
 export function getAccessToken() {
-  const cookieToken = readCookie(TOKEN_KEY);
-  if (cookieToken) return cookieToken;
-  return readStorage(TOKEN_KEY_STORAGE);
+  return readStored(TOKEN_KEY);
 }
 
 export function getRefreshToken() {
-  const cookieToken = readCookie(REFRESH_TOKEN_KEY);
-  if (cookieToken) return cookieToken;
-  return readStorage(REFRESH_TOKEN_KEY_STORAGE);
+  return readStored(REFRESH_TOKEN_KEY);
 }
 
 export function saveAuthTokens({ accessToken, refreshToken }) {
   if (accessToken) {
-    writeCookie(TOKEN_KEY, accessToken, ACCESS_TOKEN_MAX_AGE_SECONDS);
-    writeStorage(TOKEN_KEY_STORAGE, accessToken);
+    writeStoredToken(TOKEN_KEY, accessToken, ACCESS_TOKEN_MAX_AGE_SECONDS);
   }
   if (refreshToken) {
-    writeCookie(REFRESH_TOKEN_KEY, refreshToken, REFRESH_TOKEN_MAX_AGE_SECONDS);
-    writeStorage(REFRESH_TOKEN_KEY_STORAGE, refreshToken);
+    writeStoredToken(
+      REFRESH_TOKEN_KEY,
+      refreshToken,
+      REFRESH_TOKEN_MAX_AGE_SECONDS
+    );
   }
 }
 
 export function clearAuthTokens() {
   removeCookie(TOKEN_KEY);
   removeCookie(REFRESH_TOKEN_KEY);
-  removeStorage(TOKEN_KEY_STORAGE);
-  removeStorage(REFRESH_TOKEN_KEY_STORAGE);
+  writeLocalStorage(TOKEN_KEY, "");
+  writeLocalStorage(REFRESH_TOKEN_KEY, "");
 }
 
-function parseTokenResponse(json = {}) {
-  const accessToken = json?.data?.access_token || json?.access_token || "";
-  const refreshToken = json?.data?.refresh_token || json?.refresh_token || "";
+export function parseTokenResponse(json = {}) {
+  const data = json?.data || {};
+  const tokenContainer = data?.token || data?.tokens || json?.token || json?.tokens || {};
+  const accessToken =
+    data?.access_token ||
+    data?.accessToken ||
+    tokenContainer?.access_token ||
+    tokenContainer?.accessToken ||
+    json?.access_token ||
+    json?.accessToken ||
+    "";
+  const refreshToken =
+    data?.refresh_token ||
+    data?.refreshToken ||
+    tokenContainer?.refresh_token ||
+    tokenContainer?.refreshToken ||
+    json?.refresh_token ||
+    json?.refreshToken ||
+    "";
   return { accessToken, refreshToken };
 }
 

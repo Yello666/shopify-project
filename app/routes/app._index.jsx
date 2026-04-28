@@ -6,6 +6,7 @@ import { Button, Modal, Input, message, Spin, Empty } from "antd";
 import {
   authFetch,
   clearAuthTokens,
+  parseTokenResponse,
   saveAuthTokens,
 } from "../utils/auth-api";
 
@@ -66,15 +67,16 @@ export default function Index() {
         const userData = json?.data || json;
         setCurrentUser(userData);
       } else if (res.status === 403) {
-        // 账号被禁用
         message.error("账号已被禁用，请联系管理员");
         clearAuthTokens();
-      } else {
-        // 其他错误（401 等），清除本地存储
+      } else if (res.status === 401) {
         clearAuthTokens();
       }
-    } catch {
-      clearAuthTokens();
+      // 5xx / 网络策略错误等：不清 token，避免刚登录就被误删
+    } catch (e) {
+      if (e instanceof Error && e.message === "AUTH_EXPIRED") {
+        clearAuthTokens();
+      }
     }
   };
 
@@ -188,14 +190,11 @@ export default function Index() {
       body.set("password", loginForm.password);
       const res = await fetch(`${AUTH_API_BASE}/login`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: body.toString(),
       });
       const data = await res.json().catch(() => ({}));
-
-      // 优先从 data.data 取（后端 success 包装）
-      const token = data?.data?.access_token || data?.access_token;
-      const refreshToken = data?.data?.refresh_token || data?.refresh_token;
 
       if (!res.ok) {
         const detail =
@@ -206,15 +205,34 @@ export default function Index() {
         message.error(detail);
         return;
       }
-      if (token) {
-        saveAuthTokens({ accessToken: token, refreshToken });
+
+      const { accessToken, refreshToken } = parseTokenResponse(data);
+      if (accessToken || refreshToken) {
+        saveAuthTokens({ accessToken, refreshToken });
+      }
+
+      try {
+        const infoRes = await authFetch(`${MERCHANT_API_BASE}/info`);
+        if (infoRes.ok) {
+          const infoJson = await infoRes.json().catch(() => ({}));
+          setCurrentUser(infoJson?.data || infoJson);
+          message.success("登录成功");
+          setAuthModalOpen(false);
+          setLoginForm({ username: "", password: "" });
+          return;
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message === "AUTH_EXPIRED") {
+          clearAuthTokens();
+        }
+      }
+
+      if (accessToken || refreshToken) {
         message.success("登录成功");
         setAuthModalOpen(false);
         setLoginForm({ username: "", password: "" });
-        // 登录成功后获取用户信息
-        checkLoginStatus();
       } else {
-        message.error("响应格式异常");
+        message.error("登录成功但未拿到会话，请检查接口是否返回 token 或 Set-Cookie");
       }
     } catch (e) {
       message.error(e instanceof Error ? e.message : "网络错误");
