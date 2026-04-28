@@ -1,5 +1,7 @@
 export const TOKEN_KEY = "ai_decision_access_token";
 export const REFRESH_TOKEN_KEY = "ai_decision_refresh_token";
+const TOKEN_KEY_STORAGE = "ai_decision_access_token_storage";
+const REFRESH_TOKEN_KEY_STORAGE = "ai_decision_refresh_token_storage";
 const ACCESS_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 2;
 const REFRESH_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const FETCH_CREDENTIALS_MODE = "include";
@@ -9,6 +11,10 @@ let ongoingRefreshPromise = null;
 
 function canUseDocument() {
   return typeof document !== "undefined";
+}
+
+function canUseLocalStorage() {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
 function isSecureContext() {
@@ -50,26 +56,61 @@ function removeCookie(name) {
   )}=; Path=/; Max-Age=0; SameSite=Lax${secureAttr}`;
 }
 
+function readStorage(key) {
+  if (!canUseLocalStorage()) return "";
+  try {
+    return window.localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStorage(key, value) {
+  if (!canUseLocalStorage()) return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // ignore storage failures (private mode/quota/etc.)
+  }
+}
+
+function removeStorage(key) {
+  if (!canUseLocalStorage()) return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // ignore storage failures
+  }
+}
+
 export function getAccessToken() {
-  return readCookie(TOKEN_KEY);
+  const cookieToken = readCookie(TOKEN_KEY);
+  if (cookieToken) return cookieToken;
+  return readStorage(TOKEN_KEY_STORAGE);
 }
 
 export function getRefreshToken() {
-  return readCookie(REFRESH_TOKEN_KEY);
+  const cookieToken = readCookie(REFRESH_TOKEN_KEY);
+  if (cookieToken) return cookieToken;
+  return readStorage(REFRESH_TOKEN_KEY_STORAGE);
 }
 
 export function saveAuthTokens({ accessToken, refreshToken }) {
   if (accessToken) {
     writeCookie(TOKEN_KEY, accessToken, ACCESS_TOKEN_MAX_AGE_SECONDS);
+    writeStorage(TOKEN_KEY_STORAGE, accessToken);
   }
   if (refreshToken) {
     writeCookie(REFRESH_TOKEN_KEY, refreshToken, REFRESH_TOKEN_MAX_AGE_SECONDS);
+    writeStorage(REFRESH_TOKEN_KEY_STORAGE, refreshToken);
   }
 }
 
 export function clearAuthTokens() {
   removeCookie(TOKEN_KEY);
   removeCookie(REFRESH_TOKEN_KEY);
+  removeStorage(TOKEN_KEY_STORAGE);
+  removeStorage(REFRESH_TOKEN_KEY_STORAGE);
 }
 
 function parseTokenResponse(json = {}) {

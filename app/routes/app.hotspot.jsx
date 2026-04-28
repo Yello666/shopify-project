@@ -171,6 +171,7 @@ function HotspotItem({
   onToggleSelect,
   recommendationMode,
 }) {
+  const [sentimentExplainOpen, setSentimentExplainOpen] = useState(false);
   const tagsStr = formatTags(item.tags);
   const audienceStr = formatAudience(item.audience);
   const matchScoreRaw = item.match_score ?? item.matchScore;
@@ -211,14 +212,12 @@ function HotspotItem({
   if (item.warning_message) {
     extraParts.push(item.warning_message);
   }
-  if (item.sentiment_score != null && item.sentiment_score !== 0) {
-    extraParts.push(`情感分：${item.sentiment_score}`);
-  }
+  const hasSentimentScore = item.sentiment_score != null && item.sentiment_score !== 0;
   if (audienceStr) {
     extraParts.push(`受众：${audienceStr}`);
   }
   const showOriginalLink = Boolean(item.jump_url) && !hideOriginalLink;
-  const hasExtra = extraParts.length > 0 || showOriginalLink;
+  const hasExtra = extraParts.length > 0 || hasSentimentScore || showOriginalLink;
 
   return (
     <div className="hotspot-table-body-group">
@@ -315,9 +314,42 @@ function HotspotItem({
         <div
           className={`hotspot-table-row-extra ${index % 2 === 1 ? "hotspot-table-row--alt" : ""}`}
         >
-          {extraParts.length > 0 ? <span>{extraParts.join(" ｜ ")}</span> : null}
-          {showOriginalLink ? (
+          {extraParts.length > 0 ? <div>{extraParts.join(" ｜ ")}</div> : null}
+          {hasSentimentScore ? (
             <div style={{ marginTop: extraParts.length ? "0.35rem" : 0 }}>
+              <span>情感分：{item.sentiment_score}</span>
+              <button
+                type="button"
+                onClick={() => setSentimentExplainOpen((prev) => !prev)}
+                aria-label={sentimentExplainOpen ? "收起情感分解释" : "展开情感分解释"}
+                style={{
+                  marginLeft: 8,
+                  width: 18,
+                  height: 18,
+                  borderRadius: "50%",
+                  border: "1px solid var(--dash-border)",
+                  background: "transparent",
+                  color: "var(--dash-muted)",
+                  cursor: "pointer",
+                  fontSize: "0.75rem",
+                  lineHeight: 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                }}
+              >
+                ?
+              </button>
+              {sentimentExplainOpen ? (
+                <div style={{ marginTop: 6, color: "var(--dash-muted)", fontSize: "0.875rem" }}>
+                  情感分是热点的情感倾向，越靠近100情感越积极，越靠近-100情感越消极。
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {showOriginalLink ? (
+            <div style={{ marginTop: extraParts.length || hasSentimentScore ? "0.35rem" : 0 }}>
               <a href={item.jump_url} target="_blank" rel="noopener noreferrer">
                 查看原文链接
               </a>
@@ -556,6 +588,17 @@ export default function Hotspot() {
     }
   };
 
+  const handleConfirmStartRecommend = () => {
+    if (recommendSubmitting) return;
+    Modal.confirm({
+      title: "开始推荐前提示",
+      content: "计算匹配度可能耗时较长，请不要退出页面，耐心等候",
+      okText: "确认开始",
+      cancelText: "取消",
+      onOk: handleStartRecommend,
+    });
+  };
+
   const handleSaveSchedule = async () => {
     setScheduleSubmitting(true);
     try {
@@ -690,11 +733,11 @@ export default function Hotspot() {
               </Button>
               {recommendationMode ? (
                 <Button type="default" onClick={() => setRecommendationMode(false)}>
-                  收起推荐信息
+                  取消过滤
                 </Button>
               ) : (
                 <Button type="primary" onClick={openRecommendModal}>
-                  查看推荐信息
+                  根据匹配度过滤热点
                 </Button>
               )}
               {recommendationMode ? (
@@ -817,8 +860,8 @@ export default function Hotspot() {
               <Button onClick={() => setRecommendModalOpen(false)} disabled={recommendSubmitting}>
                 取消
               </Button>
-              <Button type="primary" onClick={handleStartRecommend} loading={recommendSubmitting}>
-                开始推荐
+              <Button type="primary" onClick={handleConfirmStartRecommend} loading={recommendSubmitting}>
+                开始过滤
               </Button>
             </Space>
           </Modal>

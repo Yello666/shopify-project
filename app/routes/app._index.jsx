@@ -78,7 +78,14 @@ export default function Index() {
     }
   };
 
-  const handleHotspotView = () => navigate("/app/hotspot");
+  const handleHotspotView = () => {
+    if (!currentUser) {
+      message.warning("请先登录后再查看热点");
+      openAuthLogin();
+      return;
+    }
+    navigate("/app/hotspot");
+  };
   const handleBrandEdit = () => {
     if (!currentUser) {
       message.warning("请先登录后再编辑品牌信息");
