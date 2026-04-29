@@ -568,6 +568,13 @@
   letter-spacing: 0.02em;
 }
 
+.video-chat-bootstrap__marketing-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #4f5669;
+}
+
 .video-chat-bootstrap__muted {
   margin: 0;
   font-size: 13px;
@@ -750,6 +757,7 @@
 }
 
 .video-chat-input-card {
+  position: relative;
   background: #fff;
   border-radius: 16px;
   border: 1px solid rgba(0, 0, 0, 0.07);
@@ -757,6 +765,71 @@
   padding: 0.65rem 0.75rem 0.5rem;
   max-width: 900px;
   margin: 0 auto;
+}
+
+.video-chat-ref-chip-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 0.5rem;
+}
+
+.video-chat-ref-chip-anchor {
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.video-chat-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: min(100%, 260px);
+  padding: 4px 4px 4px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.09);
+  background: linear-gradient(180deg, #fafbfe 0%, #f3f5f9 100%);
+  font-size: 12px;
+  font-weight: 500;
+  color: #3d4459;
+  line-height: 1.35;
+}
+
+.video-chat-ref-chip--product {
+  border-color: rgba(77, 105, 250, 0.24);
+  background: linear-gradient(180deg, #f7f8ff 0%, #eaeefe 100%);
+  cursor: default;
+}
+
+.video-chat-ref-chip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.video-chat-ref-chip__close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(90, 98, 118, 0.75);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.video-chat-ref-chip__close:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #2f364a;
 }
 
 .video-chat-ref-file-input {

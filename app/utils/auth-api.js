@@ -156,7 +156,7 @@ async function attemptRefreshRequest(refreshToken, contentType) {
   const hasRefreshToken = Boolean(refreshToken);
   const hasBodyMode = Boolean(contentType);
   if (!hasRefreshToken && hasBodyMode) {
-    return { refreshed: false, accessToken: "" };
+    return { refreshed: false, accessToken: "", authRejected: false };
   }
 
   let body;
@@ -177,7 +177,8 @@ async function attemptRefreshRequest(refreshToken, contentType) {
 
   const json = await response.json().catch(() => ({}));
   if (!response.ok) {
-    return { refreshed: false, accessToken: "" };
+    const authRejected = response.status === 401 || response.status === 403;
+    return { refreshed: false, accessToken: "", authRejected };
   }
 
   const tokens = parseTokenResponse(json);
@@ -185,34 +186,46 @@ async function attemptRefreshRequest(refreshToken, contentType) {
     saveAuthTokens(tokens);
   }
 
-  return { refreshed: true, accessToken: tokens.accessToken || "" };
+  return { refreshed: true, accessToken: tokens.accessToken || "", authRejected: false };
 }
 
 async function requestAccessTokenRefresh() {
-  // Prefer server-managed httpOnly cookie refresh.
-  const cookieRefresh = await attemptRefreshRequest("", "");
-  if (cookieRefresh.refreshed) {
-    return cookieRefresh;
-  }
-
-  const refreshToken = getRefreshToken();
-  if (refreshToken) {
-    const jsonRefresh = await attemptRefreshRequest(refreshToken, "application/json");
-    if (jsonRefresh.refreshed) {
-      return jsonRefresh;
+  try {
+    // Prefer server-managed httpOnly cookie refresh.
+    const cookieRefresh = await attemptRefreshRequest("", "");
+    if (cookieRefresh.refreshed) {
+      return cookieRefresh;
     }
 
-    const formRefresh = await attemptRefreshRequest(
-      refreshToken,
-      "application/x-www-form-urlencoded"
-    );
-    if (formRefresh.refreshed) {
-      return formRefresh;
-    }
-  }
+    const refreshToken = getRefreshToken();
+    if (refreshToken) {
+      const jsonRefresh = await attemptRefreshRequest(refreshToken, "application/json");
+      if (jsonRefresh.refreshed) {
+        return jsonRefresh;
+      }
 
-  clearAuthTokens();
-  return { refreshed: false, accessToken: "" };
+      const formRefresh = await attemptRefreshRequest(
+        refreshToken,
+        "application/x-www-form-urlencoded"
+      );
+      if (formRefresh.refreshed) {
+        return formRefresh;
+      }
+
+      if (jsonRefresh.authRejected || formRefresh.authRejected || cookieRefresh.authRejected) {
+        clearAuthTokens();
+      }
+      return { refreshed: false, accessToken: "" };
+    }
+
+    if (cookieRefresh.authRejected) {
+      clearAuthTokens();
+    }
+    return { refreshed: false, accessToken: "" };
+  } catch {
+    // 网络异常等：不清本地凭据，避免刷新误杀仍有效的会话
+    return { refreshed: false, accessToken: "" };
+  }
 }
 
 async function refreshAccessTokenOnce() {

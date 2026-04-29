@@ -11,7 +11,7 @@ import {
   validateRequestBodyUnderLimit,
   REFERENCE_ASSETS_RULES_SECTIONS,
 } from "../utils/video-reference-validation";
-import { Button, Input, message as antMessage, Modal, Select, Switch } from "antd";
+import { Button, Input, message as antMessage, Modal, Select, Switch, Tooltip } from "antd";
 import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -27,6 +27,7 @@ import {
   HistoryOutlined,
   GiftOutlined,
   InfoCircleOutlined,
+  CloseOutlined,
 } from "@ant-design/icons";
 
 const EMPTY_MESSAGES = [];
@@ -45,13 +46,109 @@ function uid() {
 
 const EMPTY_PENDING_REFERENCE_ASSETS = { images: [], audios: [], videos: [] };
 
-/** entries: { file, dataUrl, meta }[] → create 载荷 */
-function buildPendingMediaAssetsPayload(pending) {
+/** 文件名显示：主名前 15 个 Unicode 字形 + 扩展名（含点，小写） */
+function formatReferenceAssetChipLabel(fileName) {
+  const raw = typeof fileName === "string" ? fileName.trim() : "";
+  const base = raw.split(/[/\\]/).pop() || "";
+  const n = base || "file";
+  const lastDot = n.lastIndexOf(".");
+  const stem = lastDot >= 0 ? n.slice(0, lastDot) : n;
+  const extRaw = lastDot >= 0 ? n.slice(lastDot) : "";
+  const glyphs = Array.from(stem);
+  const head = glyphs.slice(0, 15).join("");
+  const extShow = extRaw ? extRaw.toLowerCase() : "";
+  return `${head}${extShow}`;
+}
+
+/** 与推广商品主图 URL 同步：仅用于 chip 标签与 File 名称，不上传本体 */
+function inferProductReferenceFileName(imageUrl, productName) {
+  const url = typeof imageUrl === "string" ? imageUrl.trim() : "";
+  let base = "";
+  if (url) {
+    try {
+      const path = url.replace(/\?[\s\S]*$/, "").split("/").pop() || "";
+      base = decodeURIComponent(path);
+    } catch {
+      base = url.split("/").pop()?.split("?")[0] || "";
+    }
+  }
+  const extMatch = base.match(/\.(jpe?g|png|webp|bmp|tiff?|gif)$/i);
+  const extFromUrl = extMatch ? extMatch[0].toLowerCase() : ".jpg";
+
+  const stem = typeof productName === "string" ? productName.trim().slice(0, 48) : "";
+  if (stem) {
+    return `${stem.replace(/[/\\?%*:|"<>]/g, "_")}${extFromUrl}`;
+  }
+
+  if (base && /\.(jpe?g|png|webp|bmp|tiff?|gif)$/i.test(base)) {
+    return base.slice(0, 120);
+  }
+  return "商品图.jpg";
+}
+
+/** 推广商品主图：直接使用页面已有 HTTPS 地址写入首图，打开即显示 chip，无需二次拉取转 Base64 */
+function createBootstrapProductImageEntry(imageUrl, productName) {
+  const url = typeof imageUrl === "string" ? imageUrl.trim() : "";
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  const fileName = inferProductReferenceFileName(url, productName);
+  const mime = /\.png$/i.test(fileName)
+    ? "image/png"
+    : /\.webp$/i.test(fileName)
+      ? "image/webp"
+      : /\.gif$/i.test(fileName)
+        ? "image/gif"
+        : /\.bmp$/i.test(fileName)
+          ? "image/bmp"
+          : /\.(tif|tiff)$/i.test(fileName)
+            ? "image/tiff"
+            : "image/jpeg";
+  return {
+    file: new File([], fileName, { type: mime }),
+    /** 本地选择的参考图为该字段；此处为远端 URL（与 DEMO_CREATE_THREAD_PAYLOAD 一致） */
+    dataUrl: null,
+    remoteUrl: url,
+    meta: {},
+    fromBootstrapProduct: true,
+  };
+}
+
+/** 从当前会话聊天记录中的「推广产品」上下文取商品图 URL（与卡片同源） */
+function findBootstrapProductImageInMessages(messageList) {
+  if (!Array.isArray(messageList)) return null;
+  for (let i = messageList.length - 1; i >= 0; i--) {
+    const m = messageList[i];
+    const raw =
+      typeof m?.bootstrapContext?.product?.image_url === "string"
+        ? m.bootstrapContext.product.image_url.trim()
+        : "";
+    if (!raw || !/^https?:\/\//i.test(raw)) continue;
+    const name =
+      typeof m?.bootstrapContext?.product?.name === "string" ? m.bootstrapContext.product.name.trim() : "";
+    return { url: raw, name };
+  }
+  return null;
+}
+
+function getUserReferenceAssets(pending) {
   const { images = [], audios = [], videos = [] } = pending || {};
+  return {
+    images: images.filter((x) => !x?.fromBootstrapProduct),
+    audios,
+    videos,
+  };
+}
+
+/** entries: { file, dataUrl?, remoteUrl? }[] → create 载荷 */
+function buildPendingMediaAssetsPayload(pending) {
+  const { images = [], audios = [], videos = [] } = getUserReferenceAssets(pending);
   const assets = {};
-  if (images.length) assets.ref_image_urls = images.map((x) => x.dataUrl);
-  if (audios.length) assets.ref_audio_urls = audios.map((x) => x.dataUrl);
-  if (videos.length) assets.ref_video_urls = videos.map((x) => x.dataUrl);
+  if (images.length) {
+    assets.ref_image_urls = images
+      .map((x) => (x.dataUrl ? x.dataUrl : x.remoteUrl))
+      .filter((u) => typeof u === "string" && u.trim());
+  }
+  if (audios.length) assets.reference_audio_urls = audios.map((x) => x.dataUrl);
+  if (videos.length) assets.reference_video_urls = videos.map((x) => x.dataUrl);
   return Object.keys(assets).length ? assets : null;
 }
 
@@ -92,6 +189,9 @@ const VIDEO_THREAD_API_BASE = "/api/v1/video-thread";
 /** 与后端约定：统一多模态生成（文案、参考素材等由服务端一并理解） */
 const BACKEND_GENERATION_MODE_MULTIMODAL = "multimodal_reference";
 const VIDEO_CHAT_BOOTSTRAP_KEY = "video_chat_bootstrap_v1";
+/** 刷新后恢复聊天区、线程与参数（同 tab sessionStorage）。 */
+const VIDEO_CHAT_SNAPSHOT_KEY = "video_chat_snapshot_v1";
+const VIDEO_CHAT_SNAPSHOT_VERSION = 1;
 
 /**
  * WebSocket 基础地址（无 query），与后端 `/api/v1/video-tasks/stream` 对应。
@@ -221,6 +321,183 @@ function parseGenerateBootstrap(raw) {
   return raw;
 }
 
+function serializePendingReferenceAssets(assets) {
+  const { images = [], audios = [], videos = [] } = assets || {};
+  return {
+    images: images.map((e) => ({
+      fileName: e?.file?.name || "",
+      mime: e?.file?.type || "",
+      dataUrl: e?.dataUrl || null,
+      remoteUrl: e?.remoteUrl || null,
+      meta: e?.meta && typeof e.meta === "object" ? e.meta : {},
+      fromBootstrapProduct: Boolean(e?.fromBootstrapProduct),
+    })),
+    audios: audios.map((e) => ({
+      fileName: e?.file?.name || "",
+      mime: e?.file?.type || "",
+      dataUrl: e?.dataUrl || null,
+      meta: e?.meta && typeof e.meta === "object" ? e.meta : {},
+    })),
+    videos: videos.map((e) => ({
+      fileName: e?.file?.name || "",
+      mime: e?.file?.type || "",
+      dataUrl: e?.dataUrl || null,
+      meta: e?.meta && typeof e.meta === "object" ? e.meta : {},
+    })),
+  };
+}
+
+function deserializePendingReferenceAssets(raw) {
+  if (!raw || typeof raw !== "object") {
+    return { ...EMPTY_PENDING_REFERENCE_ASSETS };
+  }
+  const mapImages = Array.isArray(raw.images)
+    ? raw.images.map((e) => {
+        const fileName =
+          typeof e?.fileName === "string" && e.fileName.trim() ? e.fileName.trim() : "file";
+        const mime =
+          typeof e?.mime === "string" && e.mime.trim() ? e.mime.trim() : "application/octet-stream";
+        return {
+          file: new File([], fileName, { type: mime }),
+          dataUrl: typeof e?.dataUrl === "string" ? e.dataUrl : null,
+          remoteUrl: typeof e?.remoteUrl === "string" ? e.remoteUrl : null,
+          meta: e?.meta && typeof e.meta === "object" ? e.meta : {},
+          fromBootstrapProduct: Boolean(e?.fromBootstrapProduct),
+        };
+      })
+    : [];
+  const mapAv = (arr, fallbackMime) =>
+    Array.isArray(arr)
+      ? arr.map((e) => {
+          const fileName =
+            typeof e?.fileName === "string" && e.fileName.trim() ? e.fileName.trim() : "file";
+          const mime =
+            typeof e?.mime === "string" && e.mime.trim() ? e.mime.trim() : fallbackMime;
+          return {
+            file: new File([], fileName, { type: mime }),
+            dataUrl: typeof e?.dataUrl === "string" ? e.dataUrl : null,
+            meta: e?.meta && typeof e.meta === "object" ? e.meta : {},
+          };
+        })
+      : [];
+  return {
+    images: mapImages,
+    audios: mapAv(raw.audios, "audio/*"),
+    videos: mapAv(raw.videos, "video/*"),
+  };
+}
+
+function readVideoChatSnapshotPayload() {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(VIDEO_CHAT_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || data.v !== VIDEO_CHAT_SNAPSHOT_VERSION) return null;
+    if (!Array.isArray(data.sessions) || data.sessions.length === 0) return null;
+    if (typeof data.activeSessionId !== "string") return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function buildDemoInitialState() {
+  const t = Date.now();
+  return {
+    sessions: [
+      { id: "s1", title: "视频生成助手", updatedAt: t },
+      { id: "s2", title: "新品预告脚本", updatedAt: t - 1000 },
+      { id: "s3", title: "社媒竖版短片", updatedAt: t - 2000 },
+    ],
+    activeSessionId: "s1",
+    messagesBySession: {
+      s1: [{ id: "m0", role: "assistant", content: WELCOME_TEXT, suggestions: true }],
+      s2: [
+        {
+          id: "m-s2-1",
+          role: "assistant",
+          content: "（演示）这是「新品预告脚本」里的消息区，与左侧其他条目内容不同。",
+        },
+        { id: "m-s2-2", role: "user", content: "突出礼盒开箱镜头" },
+      ],
+      s3: [
+        {
+          id: "m-s3-1",
+          role: "assistant",
+          content: "（演示）这是「社媒竖版短片」里的消息区，用来预览切换效果。",
+        },
+      ],
+    },
+    draft: "",
+    pendingReferenceAssets: { ...EMPTY_PENDING_REFERENCE_ASSETS },
+    createPayloadBySession: {},
+    videoParams: cloneVideoParams(DEFAULT_VIDEO_PARAMS),
+    paramDraft: cloneVideoParams(DEFAULT_VIDEO_PARAMS),
+    threadBySession: {},
+    threadViewBySession: {},
+    threadRequestingBySession: {},
+    generationStatusById: {},
+    generationToSegmentBySession: {},
+    segmentCacheBySession: {},
+    segmentDraftBySession: {},
+    segmentSubmittingBySession: {},
+  };
+}
+
+function hydrateFromSnapshotPayload(data) {
+  const paramSrc =
+    data.paramDraft && typeof data.paramDraft === "object" ? data.paramDraft : data.videoParams;
+  return {
+    sessions: data.sessions,
+    activeSessionId: data.activeSessionId,
+    messagesBySession:
+      data.messagesBySession && typeof data.messagesBySession === "object"
+        ? data.messagesBySession
+        : {},
+    draft: typeof data.draft === "string" ? data.draft : "",
+    pendingReferenceAssets: deserializePendingReferenceAssets(data.pendingReferenceAssets),
+    createPayloadBySession:
+      data.createPayloadBySession && typeof data.createPayloadBySession === "object"
+        ? data.createPayloadBySession
+        : {},
+    videoParams: cloneVideoParams({ ...DEFAULT_VIDEO_PARAMS, ...(data.videoParams || {}) }),
+    paramDraft: cloneVideoParams({ ...DEFAULT_VIDEO_PARAMS, ...(paramSrc || {}) }),
+    threadBySession:
+      data.threadBySession && typeof data.threadBySession === "object" ? data.threadBySession : {},
+    threadViewBySession:
+      data.threadViewBySession && typeof data.threadViewBySession === "object"
+        ? data.threadViewBySession
+        : {},
+    threadRequestingBySession: {},
+    generationStatusById:
+      data.generationStatusById && typeof data.generationStatusById === "object"
+        ? data.generationStatusById
+        : {},
+    generationToSegmentBySession:
+      data.generationToSegmentBySession && typeof data.generationToSegmentBySession === "object"
+        ? data.generationToSegmentBySession
+        : {},
+    segmentCacheBySession:
+      data.segmentCacheBySession && typeof data.segmentCacheBySession === "object"
+        ? data.segmentCacheBySession
+        : {},
+    segmentDraftBySession:
+      data.segmentDraftBySession && typeof data.segmentDraftBySession === "object"
+        ? data.segmentDraftBySession
+        : {},
+    segmentSubmittingBySession: {},
+  };
+}
+
+function getVideoChatInitialStateForMount() {
+  const raw = readVideoChatSnapshotPayload();
+  if (raw) {
+    return { hadSnapshot: true, ...hydrateFromSnapshotPayload(raw) };
+  }
+  return { hadSnapshot: false, ...buildDemoInitialState() };
+}
+
 const BOOTSTRAP_FOLLOW_UP_PROMPT =
   "您对于视频生成有什么想法？（视频剧情、视频氛围、上传参考图）";
 
@@ -235,6 +512,8 @@ function buildBootstrapPlainCopyText(createPayload) {
   const summary = summaryRaw && summaryRaw !== title ? summaryRaw : "";
   const tags =
     Array.isArray(trend?.tags) ? trend.tags.filter(Boolean).slice(0, 12).map(String) : [];
+  const marketingRaw =
+    typeof trend?.marketing_suggestion === "string" ? trend.marketing_suggestion.trim() : "";
 
   if (title || summary || tags.length) {
     lines.push("");
@@ -258,6 +537,12 @@ function buildBootstrapPlainCopyText(createPayload) {
     lines.push("", "[推广产品]", "（暂无）");
   }
 
+  if (marketingRaw) {
+    lines.push("");
+    lines.push("[营销建议]");
+    lines.push(marketingRaw);
+  }
+
   return lines.filter((l, i) => !(l === "" && i === lines.length - 1)).join("\n");
 }
 
@@ -271,6 +556,8 @@ function VideoChatBootstrapContextCard({ context }) {
     Boolean(summaryRaw) && summaryRaw !== title;
   const tags =
     Array.isArray(trend?.tags) ? trend.tags.filter(Boolean).slice(0, 12).map(String) : [];
+  const marketingText =
+    typeof trend?.marketing_suggestion === "string" ? trend.marketing_suggestion.trim() : "";
 
   const pName = typeof product?.name === "string" ? product.name.trim() : "";
   const img =
@@ -284,6 +571,7 @@ function VideoChatBootstrapContextCard({ context }) {
 
   const hasHotspotBlock = Boolean(title || showSummary || tags.length > 0);
   const hasProductBlock = Boolean(pName || img || priceNum);
+  const hasMarketingBlock = Boolean(marketingText);
 
   return (
     <div className="video-chat-bootstrap" role="article" aria-label="来自生成页的上下文预览">
@@ -335,7 +623,14 @@ function VideoChatBootstrapContextCard({ context }) {
         </section>
       )}
 
-      {!hasHotspotBlock && !hasProductBlock ? (
+      {hasMarketingBlock && (
+        <section className="video-chat-bootstrap__section" aria-label="营销建议">
+          <div className="video-chat-bootstrap__section-label">营销建议</div>
+          <p className="video-chat-bootstrap__marketing-text">{marketingText}</p>
+        </section>
+      )}
+
+      {!hasHotspotBlock && !hasProductBlock && !hasMarketingBlock ? (
         <p className="video-chat-bootstrap__muted">暂无可展示的上下文，可在下方直接描述你的视频需求。</p>
       ) : null}
     </div>
@@ -439,44 +734,40 @@ export const loader = async ({ request }) => {
 export default function VideoChatPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const vcInitRef = useRef(null);
+  if (vcInitRef.current === null) {
+    vcInitRef.current = getVideoChatInitialStateForMount();
+  }
+  const vcInit = vcInitRef.current;
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
-  const [sessions, setSessions] = useState(() => {
-    const t = Date.now();
-    return [
-      { id: "s1", title: "视频生成助手", updatedAt: t },
-      { id: "s2", title: "新品预告脚本", updatedAt: t - 1000 },
-      { id: "s3", title: "社媒竖版短片", updatedAt: t - 2000 },
-    ];
-  });
-  const [activeSessionId, setActiveSessionId] = useState("s1");
-  const [messagesBySession, setMessagesBySession] = useState(() => ({
-    s1: [{ id: "m0", role: "assistant", content: WELCOME_TEXT, suggestions: true }],
-    s2: [
-      { id: "m-s2-1", role: "assistant", content: "（演示）这是「新品预告脚本」里的消息区，与左侧其他条目内容不同。" },
-      { id: "m-s2-2", role: "user", content: "突出礼盒开箱镜头" },
-    ],
-    s3: [{ id: "m-s3-1", role: "assistant", content: "（演示）这是「社媒竖版短片」里的消息区，用来预览切换效果。" }],
-  }));
-  const [draft, setDraft] = useState("");
-  const [pendingReferenceAssets, setPendingReferenceAssets] = useState(() => ({
-    ...EMPTY_PENDING_REFERENCE_ASSETS,
-  }));
+  const [sessions, setSessions] = useState(() => vcInit.sessions);
+  const [activeSessionId, setActiveSessionId] = useState(() => vcInit.activeSessionId);
+  const [messagesBySession, setMessagesBySession] = useState(() => vcInit.messagesBySession);
+  const [draft, setDraft] = useState(() => vcInit.draft);
+  const [pendingReferenceAssets, setPendingReferenceAssets] = useState(() => vcInit.pendingReferenceAssets);
+  const [createPayloadBySession, setCreatePayloadBySession] = useState(() => vcInit.createPayloadBySession);
   const [sending, setSending] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
-  const [videoParams, setVideoParams] = useState(() => cloneVideoParams(DEFAULT_VIDEO_PARAMS));
+  const [videoParams, setVideoParams] = useState(() => vcInit.videoParams);
   const [paramModalOpen, setParamModalOpen] = useState(false);
   const [referenceRulesModalOpen, setReferenceRulesModalOpen] = useState(false);
-  const [paramDraft, setParamDraft] = useState(() => cloneVideoParams(DEFAULT_VIDEO_PARAMS));
-  const [threadBySession, setThreadBySession] = useState({});
-  const [threadViewBySession, setThreadViewBySession] = useState({});
-  const [threadRequestingBySession, setThreadRequestingBySession] = useState({});
-  const [generationStatusById, setGenerationStatusById] = useState({});
-  const [generationToSegmentBySession, setGenerationToSegmentBySession] = useState({});
-  const [segmentCacheBySession, setSegmentCacheBySession] = useState({});
-  const [segmentDraftBySession, setSegmentDraftBySession] = useState({});
-  const [segmentSubmittingBySession, setSegmentSubmittingBySession] = useState({});
+  const [paramDraft, setParamDraft] = useState(() => vcInit.paramDraft);
+  const [threadBySession, setThreadBySession] = useState(() => vcInit.threadBySession);
+  const [threadViewBySession, setThreadViewBySession] = useState(() => vcInit.threadViewBySession);
+  const [threadRequestingBySession, setThreadRequestingBySession] = useState(
+    () => vcInit.threadRequestingBySession,
+  );
+  const [generationStatusById, setGenerationStatusById] = useState(() => vcInit.generationStatusById);
+  const [generationToSegmentBySession, setGenerationToSegmentBySession] = useState(
+    () => vcInit.generationToSegmentBySession,
+  );
+  const [segmentCacheBySession, setSegmentCacheBySession] = useState(() => vcInit.segmentCacheBySession);
+  const [segmentDraftBySession, setSegmentDraftBySession] = useState(() => vcInit.segmentDraftBySession);
+  const [segmentSubmittingBySession, setSegmentSubmittingBySession] = useState(
+    () => vcInit.segmentSubmittingBySession,
+  );
   const scrollRef = useRef(null);
   const refFileInputRef = useRef(null);
   const wsRef = useRef(null);
@@ -506,12 +797,66 @@ export default function VideoChatPage() {
   const paramSummary = `${videoParams.resolution} · ${videoParams.ratio} · 多模态`;
 
   const pendingReferenceSummary = useMemo(() => {
-    const { images, audios, videos } = pendingReferenceAssets;
+    const { images, audios, videos } = getUserReferenceAssets(pendingReferenceAssets);
     const parts = [];
     if (images.length) parts.push(`${images.length} 张图`);
     if (audios.length) parts.push(`${audios.length} 段音频`);
     if (videos.length) parts.push(`${videos.length} 段视频`);
     return parts.join("，");
+  }, [pendingReferenceAssets]);
+
+  /** 推广商品图 chip 仅用于展示，不作为参考素材上传。 */
+  const removePendingReferenceSlot = useCallback((bucket, index) => {
+    setPendingReferenceAssets((prev) => {
+      if (bucket === "images") {
+        if (prev.images[index]?.fromBootstrapProduct) return prev;
+        return { ...prev, images: prev.images.filter((_, i) => i !== index) };
+      }
+      if (bucket === "audios") {
+        return { ...prev, audios: prev.audios.filter((_, i) => i !== index) };
+      }
+      if (bucket === "videos") {
+        return { ...prev, videos: prev.videos.filter((_, i) => i !== index) };
+      }
+      return prev;
+    });
+  }, []);
+
+  /** 已选参考文件的 chip（首图为推广商品图，与上方气泡同源） */
+  const referenceAttachmentChipItems = useMemo(() => {
+    const items = [];
+    pendingReferenceAssets.images.forEach((entry, index) => {
+      const isProductSlot = Boolean(entry?.fromBootstrapProduct);
+      items.push({
+        key: `ref-image-${index}`,
+        bucket: "images",
+        index,
+        label: formatReferenceAssetChipLabel(entry?.file?.name ?? "image"),
+        isProductSlot,
+        removable: !isProductSlot,
+      });
+    });
+    pendingReferenceAssets.audios.forEach((entry, index) => {
+      items.push({
+        key: `ref-audio-${index}`,
+        bucket: "audios",
+        index,
+        label: formatReferenceAssetChipLabel(entry?.file?.name ?? "audio"),
+        isProductSlot: false,
+        removable: true,
+      });
+    });
+    pendingReferenceAssets.videos.forEach((entry, index) => {
+      items.push({
+        key: `ref-video-${index}`,
+        bucket: "videos",
+        index,
+        label: formatReferenceAssetChipLabel(entry?.file?.name ?? "video"),
+        isProductSlot: false,
+        removable: true,
+      });
+    });
+    return items;
   }, [pendingReferenceAssets]);
 
   const messages = messagesBySession[activeSessionId] ?? EMPTY_MESSAGES;
@@ -693,6 +1038,7 @@ export default function VideoChatPage() {
   }, [activeSessionId]);
 
   useEffect(() => {
+    if (vcInit.hadSnapshot) return;
     const fromLocation = parseGenerateBootstrap(location.state?.generateBootstrap);
     let fromStorage = null;
 
@@ -733,6 +1079,10 @@ export default function VideoChatPage() {
 
     setSessions((prev) => [{ id: sessionId, title, updatedAt: now }, ...prev]);
     setActiveSessionId(sessionId);
+    setCreatePayloadBySession((prev) => ({
+      ...prev,
+      [sessionId]: deepCloneJson(incoming.createPayload),
+    }));
     setMessagesBySession((prev) => ({
       ...prev,
       [sessionId]: [
@@ -744,7 +1094,33 @@ export default function VideoChatPage() {
         ...buildBootstrapContextAssistantMessages(incoming.createPayload),
       ],
     }));
-  }, [location.state]);
+
+    const productImageUrlRaw = incoming?.createPayload?.product?.image_url;
+    const productNameRaw = incoming?.createPayload?.product?.name;
+    const productImageUrl = typeof productImageUrlRaw === "string" ? productImageUrlRaw.trim() : "";
+    const productDisplayName =
+      typeof productNameRaw === "string" ? productNameRaw.trim() : "";
+    if (productImageUrl) {
+      const entry = createBootstrapProductImageEntry(productImageUrl, productDisplayName);
+      if (entry) {
+        const next = { ...EMPTY_PENDING_REFERENCE_ASSETS, images: [entry] };
+        if (validateReferenceAggregates(next).ok) setPendingReferenceAssets(next);
+      }
+    }
+  }, [location.state, vcInit.hadSnapshot]);
+
+  /** 从历史气泡中的「推广产品」同步首图 chip（会话切换或发送清空后仍可恢复）。 */
+  useEffect(() => {
+    const found = findBootstrapProductImageInMessages(messages);
+    if (!found) return;
+    setPendingReferenceAssets((prev) => {
+      if (prev.images.length > 0) return prev;
+      const entry = createBootstrapProductImageEntry(found.url, found.name);
+      if (!entry) return prev;
+      const merged = { ...prev, images: [entry] };
+      return validateReferenceAggregates(merged).ok ? merged : prev;
+    });
+  }, [activeSessionId, messages]);
 
   useEffect(() => {
     /**
@@ -759,6 +1135,11 @@ export default function VideoChatPage() {
           if (!disposed) setCurrentUser(json?.data || json || null);
         } else if (res.status === 401 || res.status === 403) {
           clearAuthTokens();
+          try {
+            sessionStorage.removeItem(VIDEO_CHAT_SNAPSHOT_KEY);
+          } catch {
+            // ignore
+          }
           antMessage.warning(
             res.status === 403
               ? "账号不可用，请重新登录"
@@ -772,6 +1153,11 @@ export default function VideoChatPage() {
       } catch (e) {
         if (e instanceof Error && e.message === "AUTH_EXPIRED") {
           clearAuthTokens();
+          try {
+            sessionStorage.removeItem(VIDEO_CHAT_SNAPSHOT_KEY);
+          } catch {
+            // ignore
+          }
           antMessage.warning("登录状态失效，请重新登录");
           navigate("/app");
         } else {
@@ -787,8 +1173,63 @@ export default function VideoChatPage() {
     };
   }, [navigate]);
 
+  const persistVideoChatSnapshot = useCallback(() => {
+    if (typeof sessionStorage === "undefined") return;
+    try {
+      const payload = {
+        v: VIDEO_CHAT_SNAPSHOT_VERSION,
+        savedAt: Date.now(),
+        sessions,
+        activeSessionId,
+        messagesBySession,
+        draft,
+        pendingReferenceAssets: serializePendingReferenceAssets(pendingReferenceAssets),
+        createPayloadBySession,
+        videoParams,
+        paramDraft,
+        threadBySession,
+        threadViewBySession,
+        generationStatusById,
+        generationToSegmentBySession,
+        segmentCacheBySession,
+        segmentDraftBySession,
+      };
+      sessionStorage.setItem(VIDEO_CHAT_SNAPSHOT_KEY, JSON.stringify(payload));
+    } catch {
+      // 配额或其它写入失败时忽略
+    }
+  }, [
+    sessions,
+    activeSessionId,
+    messagesBySession,
+    draft,
+    pendingReferenceAssets,
+    createPayloadBySession,
+    videoParams,
+    paramDraft,
+    threadBySession,
+    threadViewBySession,
+    generationStatusById,
+    generationToSegmentBySession,
+    segmentCacheBySession,
+    segmentDraftBySession,
+  ]);
+
   useEffect(() => {
-    if (authChecking || !currentUser) return undefined;
+    persistVideoChatSnapshot();
+  }, [persistVideoChatSnapshot]);
+
+  useEffect(() => {
+    const flush = () => persistVideoChatSnapshot();
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+    };
+  }, [persistVideoChatSnapshot]);
+
+  useEffect(() => {
     manualCloseRef.current = false;
     let disposed = false;
     let socket = null;
@@ -1070,7 +1511,7 @@ export default function VideoChatPage() {
         audios: [...prev.audios, ...bucketAdds.audios],
         videos: [...prev.videos, ...bucketAdds.videos],
       };
-      const agg = validateReferenceAggregates(merged);
+      const agg = validateReferenceAggregates(getUserReferenceAssets(merged));
       if (!agg.ok) {
         antMessage.warning(agg.errors[0]);
         return prev;
@@ -1081,7 +1522,8 @@ export default function VideoChatPage() {
 
   const buildDraftCreatePayload = useCallback(
     (text) => {
-      const payload = deepCloneJson(DEMO_CREATE_THREAD_PAYLOAD);
+      const basePayload = createPayloadBySession[activeSessionId] || DEMO_CREATE_THREAD_PAYLOAD;
+      const payload = deepCloneJson(basePayload);
       payload.user_input = text || payload.user_input;
       payload.generation_mode = BACKEND_GENERATION_MODE_MULTIMODAL;
       // 先复用当前页面参数，后续你可替换成真正参数表单映射。
@@ -1092,11 +1534,12 @@ export default function VideoChatPage() {
         watermark: videoParams.watermark,
         generate_audio: videoParams.generateAudio,
       };
+      delete payload.media_assets;
       const media = buildPendingMediaAssetsPayload(pendingReferenceAssets);
       if (media) payload.media_assets = media;
       return payload;
     },
-    [videoParams, pendingReferenceAssets]
+    [activeSessionId, createPayloadBySession, videoParams, pendingReferenceAssets]
   );
 
   const closeThreadStream = useCallback((sessionId) => {
@@ -1142,7 +1585,10 @@ export default function VideoChatPage() {
         void fetchThreadStateOnce(sessionId, threadId);
       };
 
-      const es = new EventSource(`${VIDEO_THREAD_API_BASE}/${encodeURIComponent(threadId)}/stream`);
+      const es = new EventSource(
+        `${VIDEO_THREAD_API_BASE}/${encodeURIComponent(threadId)}/stream`,
+        { withCredentials: true },
+      );
       threadStreamRef.current[sessionId] = es;
 
       const parseEventData = (event) => {
@@ -1151,6 +1597,22 @@ export default function VideoChatPage() {
         } catch {
           return {};
         }
+      };
+
+      const handleStreamDone = (data) => {
+        const prevView = threadViewBySessionRef.current[sessionId] || {};
+        const merged = {
+          ...prevView,
+          status: "finished",
+          progress: 100,
+          message: data?.message || "视频生成任务已成功提交",
+          current_step: "done",
+        };
+        threadViewBySessionRef.current[sessionId] = merged;
+        appendAssistantMessage(sessionId, "视频生成任务已提交完成。");
+        setThreadViewBySession((prev) => ({ ...prev, [sessionId]: merged }));
+        void fetchThreadStateOnce(sessionId, threadId);
+        closeThreadStream(sessionId);
       };
 
       es.addEventListener("state", (event) => {
@@ -1163,6 +1625,12 @@ export default function VideoChatPage() {
 
       es.addEventListener("progress", (event) => {
         const data = parseEventData(event);
+
+        if (data?.step === "done") {
+          handleStreamDone(data);
+          return;
+        }
+
         const prevView = threadViewBySessionRef.current[sessionId] || {};
         const merged = {
           ...prevView,
@@ -1201,51 +1669,92 @@ export default function VideoChatPage() {
         hydrateWaitingHumanFromPayload(parseEventData(event));
       });
 
-      // 与 LangGraph interrupt 返回字段对齐（event 名可能为 require_human_input）
       es.addEventListener("require_human_input", (event) => {
         hydrateWaitingHumanFromPayload(parseEventData(event));
       });
 
-      es.addEventListener("done", (event) => {
+      es.addEventListener("segments_updated", (event) => {
         const data = parseEventData(event);
         const prevView = threadViewBySessionRef.current[sessionId] || {};
         const merged = {
           ...prevView,
-          status: "finished",
-          progress: 100,
-          message: data?.message || "视频生成任务已成功提交",
-          current_step: "done",
+          segments: data?.segments || prevView.segments,
+          total_duration: data?.total_duration ?? prevView.total_duration,
+          message: data?.message || prevView.message,
+          current_step: data?.step || prevView.current_step,
         };
         threadViewBySessionRef.current[sessionId] = merged;
-        appendAssistantMessage(sessionId, "视频生成任务已提交完成。");
         setThreadViewBySession((prev) => ({ ...prev, [sessionId]: merged }));
-        void fetchThreadStateOnce(sessionId, threadId);
-        closeThreadStream(sessionId);
+        if (Array.isArray(data?.segments) && data.segments.length) {
+          setSegmentCacheBySession((prev) => ({
+            ...prev,
+            [sessionId]: data.segments,
+          }));
+        }
+      });
+
+      es.addEventListener("segment_submitted", (event) => {
+        const data = parseEventData(event);
+        if (data?.segment_id && data?.generation_id) {
+          setGenerationToSegmentBySession((prev) => ({
+            ...prev,
+            [sessionId]: {
+              ...(prev[sessionId] || {}),
+              [data.generation_id]: data.segment_id,
+            },
+          }));
+          generationSessionRef.current[data.generation_id] = sessionId;
+        }
+        const remaining = data?.remaining;
+        if (typeof remaining === "number") {
+          appendAssistantMessage(
+            sessionId,
+            `分镜 #${data.segment_id} 已提交生成（剩余 ${remaining} 段）`,
+          );
+        }
+      });
+
+      es.addEventListener("params_updated", (event) => {
+        const data = parseEventData(event);
+        const prevView = threadViewBySessionRef.current[sessionId] || {};
+        const merged = {
+          ...prevView,
+          config_params: data?.config_params ?? prevView.config_params,
+          generation_mode: data?.generation_mode ?? prevView.generation_mode,
+          media_assets: data?.media_assets ?? prevView.media_assets,
+        };
+        threadViewBySessionRef.current[sessionId] = merged;
+        setThreadViewBySession((prev) => ({ ...prev, [sessionId]: merged }));
+      });
+
+      es.addEventListener("warning", (event) => {
+        const data = parseEventData(event);
+        if (data?.message) {
+          antMessage.warning(data.message);
+          appendAssistantMessage(sessionId, `⚠ 警告：${data.message}`);
+        }
       });
 
       es.addEventListener("error", (event) => {
-        const data = parseEventData(event);
-        if (data?.message) {
-          appendAssistantMessage(sessionId, `任务异常：${data.message}`);
-          const prevView = threadViewBySessionRef.current[sessionId] || {};
-          const merged = {
-            ...prevView,
-            status: "error",
-            message: data.message,
-            current_step: "error",
-          };
-          threadViewBySessionRef.current[sessionId] = merged;
-          setThreadViewBySession((prev) => ({ ...prev, [sessionId]: merged }));
-          closeThreadStream(sessionId);
-          return;
+        if (event instanceof MessageEvent && event.data) {
+          const data = parseEventData(event);
+          if (data?.message) {
+            appendAssistantMessage(sessionId, `任务异常：${data.message}`);
+            const prevView = threadViewBySessionRef.current[sessionId] || {};
+            const merged = {
+              ...prevView,
+              status: "error",
+              message: data.message,
+              current_step: "error",
+            };
+            threadViewBySessionRef.current[sessionId] = merged;
+            setThreadViewBySession((prev) => ({ ...prev, [sessionId]: merged }));
+            closeThreadStream(sessionId);
+            return;
+          }
         }
-        // SSE 异常断开时补拉一次 /state（仅一次）。
         fetchStateOnStreamFailureOnce();
       });
-
-      es.onerror = () => {
-        fetchStateOnStreamFailureOnce();
-      };
     },
     [appendAssistantMessage, closeThreadStream, fetchThreadStateOnce, tryAppendSegmentsChat, tryAppendThreadViewProgressChat]
   );
@@ -1374,7 +1883,7 @@ export default function VideoChatPage() {
     const text = draft.trim();
     if (!text || sending) return;
 
-    const agg = validateReferenceAggregates(pendingReferenceAssets);
+    const agg = validateReferenceAggregates(getUserReferenceAssets(pendingReferenceAssets));
     if (!agg.ok) {
       antMessage.error(agg.errors[0]);
       return;
@@ -1789,6 +2298,42 @@ export default function VideoChatPage() {
                 className="video-chat-ref-file-input"
                 onChange={handleRefFilesChange}
               />
+              {referenceAttachmentChipItems.length > 0 ? (
+                <div className="video-chat-ref-chip-strip" role="list" aria-label="已选参考文件">
+                  {referenceAttachmentChipItems.map((chip) => {
+                    const chipNode = (
+                      <span
+                        className={`video-chat-ref-chip ${chip.isProductSlot ? "video-chat-ref-chip--product" : ""}`}
+                        role="listitem"
+                      >
+                        <span className="video-chat-ref-chip__label">{chip.label}</span>
+                        {chip.removable ? (
+                          <button
+                            type="button"
+                            className="video-chat-ref-chip__close"
+                            aria-label={`移除 ${chip.label}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removePendingReferenceSlot(chip.bucket, chip.index);
+                            }}
+                          >
+                            <CloseOutlined aria-hidden />
+                          </button>
+                        ) : null}
+                      </span>
+                    );
+                    return chip.isProductSlot ? (
+                      <Tooltip key={chip.key} title="商品图必须上传" placement="top">
+                        <span className="video-chat-ref-chip-anchor">{chipNode}</span>
+                      </Tooltip>
+                    ) : (
+                      <span key={chip.key} className="video-chat-ref-chip-anchor">
+                        {chipNode}
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : null}
               <div className="video-chat-input-main">
                 <button
                   type="button"

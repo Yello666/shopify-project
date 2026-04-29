@@ -6,6 +6,8 @@ import { Button, Input, message, Spin, Descriptions, Tag } from "antd";
 import { authFetch } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/v1/merchant";
+/** 刷新后恢复表单草稿（在接口回填之后合并） */
+const BRAND_EDIT_DRAFT_KEY = "app_brand_edit_draft_v1";
 
 export const loader = async ({ request }) => {
   try {
@@ -19,6 +21,7 @@ export const loader = async ({ request }) => {
 export default function BrandEdit() {
   const navigate = useNavigate();
   const hasShownBrandTipRef = useRef(false);
+  const [draftReady, setDraftReady] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -61,8 +64,7 @@ export default function BrandEdit() {
       }
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-        message.warning("登录已过期，请重新登录");
-        navigate("/app");
+        message.warning("登录已过期，请重新登录后重试");
       }
     }
   }, [navigate]);
@@ -106,8 +108,7 @@ export default function BrandEdit() {
       }
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-        message.warning("登录已过期，请重新登录");
-        navigate("/app");
+        message.warning("登录已过期，请重新登录后重试");
       }
     }
   }, [navigate]);
@@ -115,15 +116,36 @@ export default function BrandEdit() {
   useEffect(() => {
     const initializePageData = async () => {
       setLoading(true);
+      let stored = null;
+      try {
+        const raw = sessionStorage.getItem(BRAND_EDIT_DRAFT_KEY);
+        stored = raw ? JSON.parse(raw) : null;
+      } catch {
+        stored = null;
+      }
       try {
         await loadUserInfo();
         await loadBrandInfo();
       } finally {
+        if (stored?.brandForm && typeof stored.brandForm === "object") {
+          setBrandForm((prev) => ({ ...prev, ...stored.brandForm }));
+        }
+        if (stored?.savedBrand) setSavedBrand(stored.savedBrand);
+        setDraftReady(true);
         setLoading(false);
       }
     };
     initializePageData();
   }, [loadBrandInfo, loadUserInfo]);
+
+  useEffect(() => {
+    if (!draftReady || loading) return;
+    try {
+      sessionStorage.setItem(BRAND_EDIT_DRAFT_KEY, JSON.stringify({ brandForm, savedBrand }));
+    } catch {
+      // ignore
+    }
+  }, [brandForm, savedBrand, draftReady, loading]);
 
   const parseAudienceInput = (str) => {
     const s = String(str || "").trim();
@@ -185,8 +207,7 @@ export default function BrandEdit() {
       loadBrandInfo();
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-        message.warning("登录已过期，请重新登录");
-        navigate("/app");
+        message.warning("登录已过期，请重新登录后重试");
       } else {
         message.error(e instanceof Error ? e.message : "网络错误");
       }

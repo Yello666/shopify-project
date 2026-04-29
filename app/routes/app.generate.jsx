@@ -9,6 +9,8 @@ import { authFetch } from "../utils/auth-api";
 const MERCHANT_API_BASE = "/api/v1/merchant";
 const PRODUCTS_API_BASE = "/api/v1/products";
 const VIDEO_CHAT_BOOTSTRAP_KEY = "video_chat_bootstrap_v1";
+/** 刷新后恢复热点 / 匹配结果 / 已选商品（无 URL 参数时） */
+const GENERATE_PAGE_STATE_KEY = "app_generate_page_v1";
 /** 本页已隐藏比例/时长/模式选择，提交时使用以下默认 */
 const DEFAULT_GENERATION_DURATION_SEC = 5;
 const DEFAULT_VIDEO_RATIO = "16:9";
@@ -99,28 +101,88 @@ export default function Generate() {
   // 页面跳转状态
   const [submitting, setSubmitting] = useState(false);
 
-  // 初始化：从 URL 参数解析热点和匹配结果
+  // 初始化：优先 URL，其次 sessionStorage（解决刷新丢 query / location.state）
   useEffect(() => {
-    const encoded = searchParams.get("hotspot");
-    const matchStr = searchParams.get("match");
-    if (!encoded) {
-      navigate("/app/hotspot");
-      return;
-    }
-    try {
-      setHotspot(JSON.parse(decodeURIComponent(encoded)));
-    } catch {
-      navigate("/app/hotspot");
-      return;
-    }
-    if (matchStr) {
+    const persistSnapshot = (hotspotObj, matchObj, productId, product) => {
       try {
-        setMatchResult(JSON.parse(decodeURIComponent(matchStr)));
+        sessionStorage.setItem(
+          GENERATE_PAGE_STATE_KEY,
+          JSON.stringify({
+            hotspot: hotspotObj,
+            matchResult: matchObj ?? null,
+            selectedProductId: productId ?? null,
+            selectedProduct: product ?? null,
+          }),
+        );
       } catch {
         // ignore
       }
+    };
+
+    const encoded = searchParams.get("hotspot");
+    const matchStr = searchParams.get("match");
+    if (encoded) {
+      try {
+        const h = JSON.parse(decodeURIComponent(encoded));
+        setHotspot(h);
+        let m = null;
+        if (matchStr) {
+          try {
+            m = JSON.parse(decodeURIComponent(matchStr));
+            setMatchResult(m);
+          } catch {
+            setMatchResult(null);
+          }
+        } else {
+          setMatchResult(null);
+        }
+        persistSnapshot(h, m, null, null);
+      } catch {
+        navigate("/app/hotspot");
+      }
+      return;
+    }
+
+    try {
+      const raw = sessionStorage.getItem(GENERATE_PAGE_STATE_KEY);
+      if (!raw) {
+        navigate("/app/hotspot");
+        return;
+      }
+      const data = JSON.parse(raw);
+      if (!data?.hotspot || typeof data.hotspot !== "object") {
+        navigate("/app/hotspot");
+        return;
+      }
+      setHotspot(data.hotspot);
+      setMatchResult(data.matchResult ?? null);
+      if (data.selectedProductId != null && data.selectedProductId !== "") {
+        setSelectedProductId(data.selectedProductId);
+      }
+      if (data.selectedProduct && typeof data.selectedProduct === "object") {
+        setSelectedProduct(normalizeProduct(data.selectedProduct));
+      }
+    } catch {
+      navigate("/app/hotspot");
     }
   }, [navigate, searchParams]);
+
+  useEffect(() => {
+    if (!hotspot) return;
+    try {
+      sessionStorage.setItem(
+        GENERATE_PAGE_STATE_KEY,
+        JSON.stringify({
+          hotspot,
+          matchResult: matchResult ?? null,
+          selectedProductId: selectedProductId ?? null,
+          selectedProduct: selectedProduct ?? null,
+        }),
+      );
+    } catch {
+      // ignore
+    }
+  }, [hotspot, matchResult, selectedProductId, selectedProduct]);
 
   // 加载商品列表
   useEffect(() => {
@@ -138,8 +200,7 @@ export default function Generate() {
       })
       .catch((e) => {
         if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-          message.warning("登录已过期，请重新登录");
-          navigate("/app");
+          message.warning("登录已过期，请重新登录后重试");
           return;
         }
         if (e instanceof Error && e.message) {
@@ -179,8 +240,7 @@ export default function Generate() {
       setSelectedProduct(normalizeProduct(json?.data || json || fallbackProduct));
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-        message.warning("登录已过期，请重新登录");
-        navigate("/app");
+        message.warning("登录已过期，请重新登录后重试");
         return;
       }
       if (fallbackProduct) {
@@ -256,12 +316,21 @@ export default function Generate() {
       variants: variantPayload,
     };
 
+    const marketingFromHotspot =
+      typeof hotspot?.marketing_suggestion === "string" ? hotspot.marketing_suggestion.trim() : "";
+    const marketingFromMatch =
+      typeof matchResult?.marketingSuggestions === "string"
+        ? matchResult.marketingSuggestions.trim()
+        : "";
+    const marketingSuggestion = marketingFromHotspot || marketingFromMatch || "";
+
     const createPayload = {
       trend: {
         title: hotspot?.title || "",
         summary: hotspot?.summary || hotspot?.title || "",
         tags: Array.isArray(hotspot?.tags) ? hotspot.tags : [],
         audience: Array.isArray(hotspot?.audience) ? hotspot.audience : null,
+        ...(marketingSuggestion ? { marketing_suggestion: marketingSuggestion } : {}),
       },
       brand: brandPayload,
       product: productPayload,

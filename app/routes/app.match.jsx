@@ -6,6 +6,8 @@ import { Button, Tag, Space, message, Input, Card, Spin, Modal, Descriptions } f
 import { authFetch } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/v1/merchant";
+/** 刷新后恢复已选热点、匹配结果、表单（无 URL 参数时） */
+const MATCH_PAGE_STATE_KEY = "app_match_page_v1";
 
 function formatTags(tags) {
   if (!Array.isArray(tags) || tags.length === 0) return null;
@@ -49,6 +51,23 @@ export default function Match() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    const persistFromHotspots = (list, extra = {}) => {
+      try {
+        const raw = sessionStorage.getItem(MATCH_PAGE_STATE_KEY);
+        const prev = raw ? JSON.parse(raw) : {};
+        sessionStorage.setItem(
+          MATCH_PAGE_STATE_KEY,
+          JSON.stringify({
+            ...prev,
+            hotspots: list,
+            ...extra,
+          }),
+        );
+      } catch {
+        // ignore
+      }
+    };
+
     const encodedList = searchParams.get("hotspots");
     const encodedSingle = searchParams.get("hotspot");
     try {
@@ -56,19 +75,54 @@ export default function Match() {
         const parsed = JSON.parse(decodeURIComponent(encodedList));
         if (Array.isArray(parsed) && parsed.length > 0) {
           setHotspots(parsed);
+          persistFromHotspots(parsed, { results: [], error: null });
           return;
         }
       }
       if (encodedSingle) {
         const parsedSingle = JSON.parse(decodeURIComponent(encodedSingle));
-        setHotspots(parsedSingle ? [parsedSingle] : []);
+        const arr = parsedSingle ? [parsedSingle] : [];
+        setHotspots(arr);
+        persistFromHotspots(arr, { results: [], error: null });
         return;
       }
-      navigate("/app/hotspot");
+      const raw = sessionStorage.getItem(MATCH_PAGE_STATE_KEY);
+      if (!raw) {
+        navigate("/app/hotspot");
+        return;
+      }
+      const data = JSON.parse(raw);
+      if (!Array.isArray(data?.hotspots) || data.hotspots.length === 0) {
+        navigate("/app/hotspot");
+        return;
+      }
+      setHotspots(data.hotspots);
+      if (Array.isArray(data.results)) setResults(data.results);
+      if (typeof data.error === "string") setError(data.error);
     } catch {
       navigate("/app/hotspot");
     }
   }, [navigate, searchParams]);
+
+  useEffect(() => {
+    if (!hotspots.length) return;
+    try {
+      const raw = sessionStorage.getItem(MATCH_PAGE_STATE_KEY);
+      const prev = raw ? JSON.parse(raw) : {};
+      sessionStorage.setItem(
+        MATCH_PAGE_STATE_KEY,
+        JSON.stringify({
+          ...prev,
+          hotspots,
+          results,
+          brandForm,
+          error: error ?? null,
+        }),
+      );
+    } catch {
+      // ignore
+    }
+  }, [hotspots, results, brandForm, error]);
 
   const loadUserInfo = useCallback(async () => {
     try {
@@ -92,8 +146,7 @@ export default function Match() {
       }
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-        message.warning("登录已过期，请重新登录");
-        navigate("/app");
+        message.warning("登录已过期，请重新登录后重试");
       }
     }
   }, [navigate]);
@@ -119,8 +172,7 @@ export default function Match() {
       }));
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-        message.warning("登录已过期，请重新登录");
-        navigate("/app");
+        message.warning("登录已过期，请重新登录后重试");
       }
     }
   }, [navigate]);
@@ -128,11 +180,24 @@ export default function Match() {
   useEffect(() => {
     if (!hotspots.length) return;
     let cancelled = false;
+    let storedBrandForm = null;
+    try {
+      const raw = sessionStorage.getItem(MATCH_PAGE_STATE_KEY);
+      const data = raw ? JSON.parse(raw) : null;
+      if (data?.brandForm && typeof data.brandForm === "object") {
+        storedBrandForm = data.brandForm;
+      }
+    } catch {
+      storedBrandForm = null;
+    }
     const run = async () => {
       setBrandLoading(true);
       try {
         await loadUserInfo();
         if (!cancelled) await loadBrandInfo();
+        if (!cancelled && storedBrandForm) {
+          setBrandForm((f) => ({ ...f, ...storedBrandForm }));
+        }
       } finally {
         if (!cancelled) setBrandLoading(false);
       }
@@ -205,8 +270,7 @@ export default function Match() {
       message.success("品牌信息已更新");
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-        message.warning("登录已过期，请重新登录");
-        navigate("/app");
+        message.warning("登录已过期，请重新登录后重试");
       } else {
         message.error(e instanceof Error ? e.message : "网络错误");
       }
@@ -250,11 +314,10 @@ export default function Match() {
         : (Array.isArray(json?.data) ? json.data : []);
       setResults(items);
     } catch (err) {
-      if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
-        message.warning("请先登录");
-        navigate("/app");
+      if (err instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(err.message)) {
+        message.warning("请先登录或重新登录后重试");
       } else {
-        setError(err.message);
+        setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
       setSubmitting(false);
