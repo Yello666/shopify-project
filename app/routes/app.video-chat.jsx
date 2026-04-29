@@ -3,22 +3,21 @@ import { useNavigate, useLocation } from "react-router";
 import "../styles/video-chat.css";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { authFetch, clearAuthTokens } from "../utils/auth-api";
+import { authFetch, clearAuthTokens, getAccessToken } from "../utils/auth-api";
+import {
+  classifyReferenceFileStrict,
+  validateReferenceAggregates,
+  validateReferenceFileAndRead,
+  validateRequestBodyUnderLimit,
+  REFERENCE_ASSETS_RULES_SECTIONS,
+} from "../utils/video-reference-validation";
 import { Button, Input, message as antMessage, Modal, Select, Switch } from "antd";
 import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   PlusOutlined,
+  ArrowUpOutlined,
   SettingOutlined,
-  PaperClipOutlined,
-  ThunderboltOutlined,
-  EditOutlined,
-  VideoCameraOutlined,
-  PictureOutlined,
-  CodeOutlined,
-  TranslationOutlined,
-  MoreOutlined,
-  AudioOutlined,
   ShareAltOutlined,
   CopyOutlined,
   ReloadOutlined,
@@ -27,6 +26,7 @@ import {
   CheckSquareOutlined,
   HistoryOutlined,
   GiftOutlined,
+  InfoCircleOutlined,
 } from "@ant-design/icons";
 
 const EMPTY_MESSAGES = [];
@@ -39,19 +39,20 @@ const MOCK_TASKS = [
   { id: "t2", label: "热点借势 · 排队中", active: false },
 ];
 
-const INPUT_TOOLS = [
-  { key: "attach", icon: PaperClipOutlined, label: "附件" },
-  { key: "quick", icon: ThunderboltOutlined, label: "快速" },
-  { key: "write", icon: EditOutlined, label: "帮我写作" },
-  { key: "video", icon: VideoCameraOutlined, label: "视频生成", primary: true },
-  { key: "image", icon: PictureOutlined, label: "图像生成" },
-  { key: "code", icon: CodeOutlined, label: "编程" },
-  { key: "translate", icon: TranslationOutlined, label: "翻译" },
-  { key: "more", icon: MoreOutlined, label: "更多" },
-];
-
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+const EMPTY_PENDING_REFERENCE_ASSETS = { images: [], audios: [], videos: [] };
+
+/** entries: { file, dataUrl, meta }[] → create 载荷 */
+function buildPendingMediaAssetsPayload(pending) {
+  const { images = [], audios = [], videos = [] } = pending || {};
+  const assets = {};
+  if (images.length) assets.ref_image_urls = images.map((x) => x.dataUrl);
+  if (audios.length) assets.ref_audio_urls = audios.map((x) => x.dataUrl);
+  if (videos.length) assets.ref_video_urls = videos.map((x) => x.dataUrl);
+  return Object.keys(assets).length ? assets : null;
 }
 
 const DEFAULT_VIDEO_PARAMS = {
@@ -88,20 +89,21 @@ const RESPONSE_LANG_OPTIONS = [
 ];
 const MERCHANT_API_BASE = "/api/v1/merchant";
 const VIDEO_THREAD_API_BASE = "/api/v1/video-thread";
-/** 与后端约定：统一多模态生成（文案、参考图等由服务端一并理解） */
+/** 与后端约定：统一多模态生成（文案、参考素材等由服务端一并理解） */
 const BACKEND_GENERATION_MODE_MULTIMODAL = "multimodal_reference";
 const VIDEO_CHAT_BOOTSTRAP_KEY = "video_chat_bootstrap_v1";
 
 /**
- * WebSocket 地址（无 query），与后端 `/api/v1/video-tasks/stream` 对应。
+ * WebSocket 基础地址（无 query），与后端 `/api/v1/video-tasks/stream` 对应。
  *
  * - **线上**：页面在 `shop-ai.cc` 等正式域时，走同源 `wss://当前域名/...`（经 Nginx → 上游）。
  * - **本地 shopify app dev**（`localhost:*` / `*.localhost`）：默认走 **同源** `ws(s)://当前页面域名/...`，
- *   由 Vite `proxy`/网关转发；这样浏览器握手会带上本站点的 `Cookie: access_token=…`。
- *   若必须用远程 WS（无同源代理），设置 `VITE_VIDEO_TASKS_WS_URL`（整段 wss URL），或使用
+ *   由 Vite `proxy` 转发到后端。
+ *   若必须直连远程 WS（无同源代理），设置 `VITE_VIDEO_TASKS_WS_URL`（整段 wss URL），或使用
  *   `VITE_VIDEO_TASKS_WS_USE_REMOTE=true` + `VITE_VIDEO_TASKS_WS_ORIGIN`。
  *
- * WebSocket 无法用 JS 追加 Header；同源是唯一可靠携带 Cookie 的方式（除非后端支持 URL query 等非 Cookie 鉴权）。
+ * 鉴权方式：WebSocket 无法用 JS 追加 Header，因此统一通过 URL query `?access_token=...` 携带。
+ * 调用方需自行把 token 拼到 URL 上（见 `openWebSocket`）。
  */
 function getVideoTasksWebSocketBaseUrl() {
   const explicit = import.meta.env?.VITE_VIDEO_TASKS_WS_URL;
@@ -456,12 +458,16 @@ export default function VideoChatPage() {
     s3: [{ id: "m-s3-1", role: "assistant", content: "（演示）这是「社媒竖版短片」里的消息区，用来预览切换效果。" }],
   }));
   const [draft, setDraft] = useState("");
+  const [pendingReferenceAssets, setPendingReferenceAssets] = useState(() => ({
+    ...EMPTY_PENDING_REFERENCE_ASSETS,
+  }));
   const [sending, setSending] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
   const [videoParams, setVideoParams] = useState(() => cloneVideoParams(DEFAULT_VIDEO_PARAMS));
   const [paramModalOpen, setParamModalOpen] = useState(false);
+  const [referenceRulesModalOpen, setReferenceRulesModalOpen] = useState(false);
   const [paramDraft, setParamDraft] = useState(() => cloneVideoParams(DEFAULT_VIDEO_PARAMS));
   const [threadBySession, setThreadBySession] = useState({});
   const [threadViewBySession, setThreadViewBySession] = useState({});
@@ -472,6 +478,7 @@ export default function VideoChatPage() {
   const [segmentDraftBySession, setSegmentDraftBySession] = useState({});
   const [segmentSubmittingBySession, setSegmentSubmittingBySession] = useState({});
   const scrollRef = useRef(null);
+  const refFileInputRef = useRef(null);
   const wsRef = useRef(null);
   const wsOpenedRef = useRef(false);
   const manualCloseRef = useRef(false);
@@ -497,6 +504,15 @@ export default function VideoChatPage() {
   };
 
   const paramSummary = `${videoParams.resolution} · ${videoParams.ratio} · 多模态`;
+
+  const pendingReferenceSummary = useMemo(() => {
+    const { images, audios, videos } = pendingReferenceAssets;
+    const parts = [];
+    if (images.length) parts.push(`${images.length} 张图`);
+    if (audios.length) parts.push(`${audios.length} 段音频`);
+    if (videos.length) parts.push(`${videos.length} 段视频`);
+    return parts.join("，");
+  }, [pendingReferenceAssets]);
 
   const messages = messagesBySession[activeSessionId] ?? EMPTY_MESSAGES;
   const activeThreadId = threadBySession[activeSessionId] || "";
@@ -780,11 +796,20 @@ export default function VideoChatPage() {
     const openWebSocket = () => {
       if (disposed) return;
 
-      const wsUrl = getVideoTasksWebSocketBaseUrl();
-      if (!wsUrl) {
+      const baseUrl = getVideoTasksWebSocketBaseUrl();
+      if (!baseUrl) {
         antMessage.warning("无法解析实时连接地址");
         return;
       }
+
+      const token = getAccessToken();
+      if (!token) {
+        antMessage.warning("登录态缺失，无法建立实时连接，请重新登录");
+        return;
+      }
+
+      const separator = baseUrl.includes("?") ? "&" : "?";
+      const wsUrl = `${baseUrl}${separator}access_token=${encodeURIComponent(token)}`;
 
       socket = new WebSocket(wsUrl);
       wsRef.current = socket;
@@ -892,7 +917,7 @@ export default function VideoChatPage() {
           if (code === 4001) {
             hint = "（鉴权失败，请重新登录）";
           } else if (code === 1006) {
-            hint = "（常见原因：未带上鉴权 Cookie、跨域、或网关未放行 WebSocket）";
+            hint = "（常见原因：access_token 失效/缺失、跨域、或网关未放行 WebSocket）";
           }
           antMessage.warning(
             `实时连接未建立（code: ${code}${reason ? `，${reason}` : ""}）${hint}`.trim(),
@@ -1011,6 +1036,49 @@ export default function VideoChatPage() {
     }));
   }, [activeSessionId]);
 
+  const handleRefFilesChange = useCallback(async (e) => {
+    const rawFiles = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!rawFiles.length) return;
+
+    const bucketAdds = { images: [], audios: [], videos: [] };
+    for (const file of rawFiles) {
+      const bucket = classifyReferenceFileStrict(file);
+      if (!bucket) {
+        antMessage.warning(
+          `${file.name} 不支持：请上传图片（jpeg/png/webp/bmp/tiff/gif）、音频（wav/mp3）或参考视频（mp4/mov）`,
+        );
+        continue;
+      }
+      const result = await validateReferenceFileAndRead(file, bucket);
+      if (!result.ok) {
+        antMessage.warning(result.errors[0]);
+        continue;
+      }
+      bucketAdds[bucket].push(result.entry);
+    }
+
+    const hasAny =
+      bucketAdds.images.length > 0 ||
+      bucketAdds.audios.length > 0 ||
+      bucketAdds.videos.length > 0;
+    if (!hasAny) return;
+
+    setPendingReferenceAssets((prev) => {
+      const merged = {
+        images: [...prev.images, ...bucketAdds.images],
+        audios: [...prev.audios, ...bucketAdds.audios],
+        videos: [...prev.videos, ...bucketAdds.videos],
+      };
+      const agg = validateReferenceAggregates(merged);
+      if (!agg.ok) {
+        antMessage.warning(agg.errors[0]);
+        return prev;
+      }
+      return merged;
+    });
+  }, []);
+
   const buildDraftCreatePayload = useCallback(
     (text) => {
       const payload = deepCloneJson(DEMO_CREATE_THREAD_PAYLOAD);
@@ -1024,9 +1092,11 @@ export default function VideoChatPage() {
         watermark: videoParams.watermark,
         generate_audio: videoParams.generateAudio,
       };
+      const media = buildPendingMediaAssetsPayload(pendingReferenceAssets);
+      if (media) payload.media_assets = media;
       return payload;
     },
-    [videoParams]
+    [videoParams, pendingReferenceAssets]
   );
 
   const closeThreadStream = useCallback((sessionId) => {
@@ -1303,30 +1373,54 @@ export default function VideoChatPage() {
   const handleSend = async () => {
     const text = draft.trim();
     if (!text || sending) return;
-    const sessionId = activeSessionId;
-    setSending(true);
-    setDraft("");
 
-    appendMessages(sessionId, (list) => [
-      ...list.map((m) => ({ ...m, suggestions: false })),
-      { id: uid(), role: "user", content: text },
-    ]);
-
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.id === sessionId
-          ? {
-              ...s,
-              title: s.title === "新对话" || s.title === "视频生成助手" ? text.slice(0, 18) + (text.length > 18 ? "…" : "") : s.title,
-              updatedAt: Date.now(),
-            }
-          : s,
-      ),
-    );
+    const agg = validateReferenceAggregates(pendingReferenceAssets);
+    if (!agg.ok) {
+      antMessage.error(agg.errors[0]);
+      return;
+    }
 
     const payload = buildDraftCreatePayload(text);
-    await createVideoThread(sessionId, payload);
-    setSending(false);
+    const sizeOk = validateRequestBodyUnderLimit(payload);
+    if (!sizeOk.ok) {
+      antMessage.error(sizeOk.errors[0]);
+      return;
+    }
+
+    const sessionId = activeSessionId;
+    setSending(true);
+    try {
+      setDraft("");
+
+      appendMessages(sessionId, (list) => [
+        ...list.map((m) => ({ ...m, suggestions: false })),
+        { id: uid(), role: "user", content: text },
+      ]);
+
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId
+            ? {
+                ...s,
+                title:
+                  s.title === "新对话" || s.title === "视频生成助手"
+                    ? text.slice(0, 18) + (text.length > 18 ? "…" : "")
+                    : s.title,
+                updatedAt: Date.now(),
+              }
+            : s,
+        ),
+      );
+
+      await createVideoThread(sessionId, payload);
+      setPendingReferenceAssets({ ...EMPTY_PENDING_REFERENCE_ASSETS });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "发送失败";
+      antMessage.error(msg);
+      setDraft(text);
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleSendFixedRequest = async () => {
@@ -1687,56 +1781,92 @@ export default function VideoChatPage() {
               </div>
             )}
             <div className="video-chat-input-card">
-              <Input.TextArea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onPressEnter={(e) => {
-                  if (!e.shiftKey) {
-                    e.preventDefault();
-                    if (activeWaitingHuman) {
-                      void handleResumeFeedback();
-                      return;
-                    }
-                    handleSend();
-                  }
-                }}
-                placeholder={inputPlaceholder}
-                autoSize={{ minRows: 2, maxRows: 6 }}
-                className="video-chat-textarea"
-                disabled={sending}
+              <input
+                ref={refFileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/bmp,image/gif,image/tiff,audio/wav,audio/mpeg,video/mp4,video/quicktime,.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff,.gif,.wav,.mp3,.mp4,.mov"
+                multiple
+                className="video-chat-ref-file-input"
+                onChange={handleRefFilesChange}
               />
-              <div className="video-chat-input-toolbar">
-                <div className="video-chat-input-tools">
-                  {INPUT_TOOLS.map((t) => {
-                    const Icon = t.icon;
-                    return (
-                      <button
-                        key={t.key}
-                        type="button"
-                        className={`video-chat-tool ${t.primary ? "video-chat-tool--primary" : ""}`}
-                        onClick={() => {
-                          if (t.key === "video") antMessage.info("视频生成模式（演示）");
-                        }}
-                      >
-                        <Icon />
-                        <span>{t.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <Button
-                  size="small"
-                  type="default"
-                  icon={<SettingOutlined />}
-                  onClick={openParamModal}
-                  className="video-chat-param-btn video-chat-param-btn--input"
+              <div className="video-chat-input-main">
+                <button
+                  type="button"
+                  className="video-chat-upload-tile"
+                  aria-label="上传参考文件"
+                    title={
+                    pendingReferenceSummary
+                      ? `已添加 ${pendingReferenceSummary}，点击继续添加`
+                      : "上传参考文件（见「参考资源参数限制」）"
+                  }
+                  disabled={sending}
+                  onClick={() => refFileInputRef.current?.click()}
                 >
-                  视频参数
-                </Button>
-                <button type="button" className="video-chat-mic" aria-label="语音输入">
-                  <AudioOutlined />
+                  <span className="video-chat-upload-tile__surface">
+                    <PlusOutlined className="video-chat-upload-tile__icon" aria-hidden />
+                  </span>
                 </button>
+                <div className="video-chat-input-body">
+                  <Input.TextArea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onPressEnter={(e) => {
+                      if (!e.shiftKey) {
+                        e.preventDefault();
+                        if (activeWaitingHuman) {
+                          void handleResumeFeedback();
+                          return;
+                        }
+                        handleSend();
+                      }
+                    }}
+                    placeholder={inputPlaceholder}
+                    autoSize={{ minRows: 2, maxRows: 6 }}
+                    className="video-chat-textarea"
+                    disabled={sending}
+                  />
+                  <div className="video-chat-input-footer">
+                    <div className="video-chat-input-toolbar">
+                      <Button
+                        size="small"
+                        type="default"
+                        icon={<SettingOutlined />}
+                        onClick={openParamModal}
+                        className="video-chat-param-btn video-chat-param-btn--input"
+                      >
+                        视频参数
+                      </Button>
+                    </div>
+                    <button
+                      type="button"
+                      className="video-chat-send-fab"
+                      aria-label={activeWaitingHuman ? "提交反馈" : "发送"}
+                      disabled={
+                        sending ||
+                        (activeWaitingHuman && activeThreadRequesting) ||
+                        !draft.trim()
+                      }
+                      onClick={() => {
+                        if (activeWaitingHuman) void handleResumeFeedback();
+                        else void handleSend();
+                      }}
+                    >
+                      <ArrowUpOutlined aria-hidden />
+                    </button>
+                  </div>
+                </div>
               </div>
+            </div>
+            <div className="video-chat-ref-rules-bar">
+              <Button
+                type="link"
+                size="small"
+                className="video-chat-ref-rules-btn"
+                icon={<InfoCircleOutlined />}
+                onClick={() => setReferenceRulesModalOpen(true)}
+              >
+                参考资源参数限制
+              </Button>
             </div>
             <div className="video-chat-input-hint">
               Enter 发送 · 实时连接{wsConnected ? "已连接" : "未连接"} ·
@@ -1761,6 +1891,33 @@ export default function VideoChatPage() {
           </div>
         </main>
       </div>
+
+      <Modal
+        title="参考资源参数限制"
+        open={referenceRulesModalOpen}
+        onCancel={() => setReferenceRulesModalOpen(false)}
+        footer={
+          <Button type="primary" onClick={() => setReferenceRulesModalOpen(false)}>
+            知道了
+          </Button>
+        }
+        width={560}
+        destroyOnHidden
+        className="video-chat-ref-rules-modal"
+      >
+        <div className="video-chat-ref-rules-body">
+          {REFERENCE_ASSETS_RULES_SECTIONS.map((section) => (
+            <section key={section.title} className="video-chat-ref-rules-section">
+              <h4 className="video-chat-ref-rules-section__title">{section.title}</h4>
+              <ul className="video-chat-ref-rules-section__list">
+                {section.bullets.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      </Modal>
 
       <Modal
         title="视频生成参数"
