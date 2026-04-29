@@ -10,9 +10,9 @@ import {
   saveAuthTokens,
 } from "../utils/auth-api";
 
-/** 与 Vite 代理 `/api/auth` → 后端 `/api/v1/auth` 一致；生产环境需在同源或网关配置相同转发 */
-const AUTH_API_BASE = "/api/auth";
-const MERCHANT_API_BASE = "/api/merchant";
+/** 与网关一致：统一 `/api/v1/*`；开发由 Vite 原样反代到上游 */
+const AUTH_API_BASE = "/api/v1/auth";
+const MERCHANT_API_BASE = "/api/v1/merchant";
 
 function parseProductListResponse(json) {
   if (Array.isArray(json?.data)) return json.data;

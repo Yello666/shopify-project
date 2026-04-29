@@ -1,10 +1,12 @@
 export const TOKEN_KEY = "ai_decision_access_token";
 export const REFRESH_TOKEN_KEY = "ai_decision_refresh_token";
+/** 网关/WebSocket 等仅解析 `Cookie: access_token=…` 时使用的 Cookie 名（与 TOKEN_KEY 同值并存）。 */
+export const ACCESS_TOKEN_COOKIE_NAME = "access_token";
 const ACCESS_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 2;
 const REFRESH_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const FETCH_CREDENTIALS_MODE = "include";
 
-const REFRESH_ENDPOINT = "/api/auth/refresh";
+const REFRESH_ENDPOINT = "/api/v1/auth/refresh";
 let ongoingRefreshPromise = null;
 
 function canUseDocument() {
@@ -90,7 +92,16 @@ function removeCookie(name) {
 }
 
 export function getAccessToken() {
-  return readStored(TOKEN_KEY);
+  const fromPrimary = readStored(TOKEN_KEY);
+  const fromAlias = readCookie(ACCESS_TOKEN_COOKIE_NAME);
+  if (fromPrimary && !fromAlias) {
+    writeCookie(
+      ACCESS_TOKEN_COOKIE_NAME,
+      fromPrimary,
+      ACCESS_TOKEN_MAX_AGE_SECONDS,
+    );
+  }
+  return fromPrimary || fromAlias;
 }
 
 export function getRefreshToken() {
@@ -100,6 +111,7 @@ export function getRefreshToken() {
 export function saveAuthTokens({ accessToken, refreshToken }) {
   if (accessToken) {
     writeStoredToken(TOKEN_KEY, accessToken, ACCESS_TOKEN_MAX_AGE_SECONDS);
+    writeCookie(ACCESS_TOKEN_COOKIE_NAME, accessToken, ACCESS_TOKEN_MAX_AGE_SECONDS);
   }
   if (refreshToken) {
     writeStoredToken(
@@ -112,6 +124,7 @@ export function saveAuthTokens({ accessToken, refreshToken }) {
 
 export function clearAuthTokens() {
   removeCookie(TOKEN_KEY);
+  removeCookie(ACCESS_TOKEN_COOKIE_NAME);
   removeCookie(REFRESH_TOKEN_KEY);
   writeLocalStorage(TOKEN_KEY, "");
   writeLocalStorage(REFRESH_TOKEN_KEY, "");

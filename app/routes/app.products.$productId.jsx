@@ -5,7 +5,7 @@ import { authenticate } from "../shopify.server";
 import { Button, Spin, Tag, Descriptions } from "antd";
 import { authFetch } from "../utils/auth-api";
 
-const MERCHANT_API_BASE = "/api/merchant";
+const MERCHANT_API_BASE = "/api/v1/merchant";
 
 function normalizeProduct(raw) {
   if (!raw || typeof raw !== "object") return raw;

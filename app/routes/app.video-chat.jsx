@@ -4,7 +4,7 @@ import "../styles/video-chat.css";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { authFetch, clearAuthTokens } from "../utils/auth-api";
-import { Button, Input, message as antMessage, Modal, Select, Switch, Radio, Upload } from "antd";
+import { Button, Input, message as antMessage, Modal, Select, Switch } from "antd";
 import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -32,7 +32,7 @@ import {
 const EMPTY_MESSAGES = [];
 
 const WELCOME_TEXT =
-  "你好，我是视频生成助手。你可以描述想要的画面、风格与时长，我会根据你的需求生成营销短视频（当前为界面演示，尚未连接后端）。";
+  "你好～我是你的视频生成助手，请你把你对于视频的想法输入对话框（如视频剧情、视频氛围），我会帮你生成视频～";
 
 const MOCK_TASKS = [
   { id: "t1", label: "夏季新品推广 · 生成中", active: true },
@@ -59,7 +59,8 @@ const DEFAULT_VIDEO_PARAMS = {
   ratio: "adaptive",
   watermark: true,
   generateAudio: true,
-  generationMode: "text_to_video",
+  /** 固定多模态，不在界面切换 */
+  generationMode: "multimodal_reference",
   referenceUsageDescription: "",
   responseLang: "zh",
   firstFrameList: [],
@@ -81,30 +82,26 @@ const RATIO_OPTIONS = [
   { value: "21:9", label: "21:9" },
 ];
 
-const GENERATION_MODE_OPTIONS = [
-  { value: "text_to_video", label: "文字生成视频" },
-  { value: "reference_to_video", label: "参考图生视频（1～4 张参考图）" },
-  { value: "first_last_frame", label: "首尾帧生成视频" },
-];
-
 const RESPONSE_LANG_OPTIONS = [
   { value: "zh", label: "中文（zh）" },
   { value: "en", label: "英文（en）" },
 ];
-const MERCHANT_API_BASE = "/api/merchant";
-const VIDEO_THREAD_API_BASE = "/api/video-thread";
-const UI_MODE_TO_BACKEND_MODE = {
-  text_to_video: "text_to_video",
-  reference_to_video: "image_to_video",
-  first_last_frame: "frame_interpolation",
-};
+const MERCHANT_API_BASE = "/api/v1/merchant";
+const VIDEO_THREAD_API_BASE = "/api/v1/video-thread";
+/** 与后端约定：统一多模态生成（文案、参考图等由服务端一并理解） */
+const BACKEND_GENERATION_MODE_MULTIMODAL = "multimodal_reference";
 const VIDEO_CHAT_BOOTSTRAP_KEY = "video_chat_bootstrap_v1";
 
 /**
- * WebSocket 地址（无 query），与后端 `video_tasks.py` 的 `/api/v1/video-tasks/stream` 对应。
- * 鉴权仅依赖浏览器自动携带的 Cookie（`access_token` 等），不在 URL 上附加 `token`。
+ * WebSocket 地址（无 query），与后端 `/api/v1/video-tasks/stream` 对应。
  *
- * 优先级：`VITE_VIDEO_TASKS_WS_URL` → `VITE_API_ORIGIN` → 默认同源（`https` 用 `wss`，`http` 用 `ws`）。
+ * - **线上**：页面在 `shop-ai.cc` 等正式域时，走同源 `wss://当前域名/...`（经 Nginx → 上游）。
+ * - **本地 shopify app dev**（`localhost:*` / `*.localhost`）：默认走 **同源** `ws(s)://当前页面域名/...`，
+ *   由 Vite `proxy`/网关转发；这样浏览器握手会带上本站点的 `Cookie: access_token=…`。
+ *   若必须用远程 WS（无同源代理），设置 `VITE_VIDEO_TASKS_WS_URL`（整段 wss URL），或使用
+ *   `VITE_VIDEO_TASKS_WS_USE_REMOTE=true` + `VITE_VIDEO_TASKS_WS_ORIGIN`。
+ *
+ * WebSocket 无法用 JS 追加 Header；同源是唯一可靠携带 Cookie 的方式（除非后端支持 URL query 等非 Cookie 鉴权）。
  */
 function getVideoTasksWebSocketBaseUrl() {
   const explicit = import.meta.env?.VITE_VIDEO_TASKS_WS_URL;
@@ -112,21 +109,35 @@ function getVideoTasksWebSocketBaseUrl() {
     return explicit.trim().split(/[?#]/)[0];
   }
 
-  const apiOrigin = import.meta.env?.VITE_API_ORIGIN;
-  if (typeof apiOrigin === "string" && apiOrigin.trim()) {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const h = window.location.hostname;
+  const isLocalDevHost =
+    h === "localhost" || h === "127.0.0.1" || h.endsWith(".localhost");
+
+  const useRemote =
+    String(import.meta.env?.VITE_VIDEO_TASKS_WS_USE_REMOTE || "").trim() ===
+    "true";
+
+  if (isLocalDevHost && useRemote) {
+    const publicOriginRaw = import.meta.env?.VITE_VIDEO_TASKS_WS_ORIGIN;
+    const publicOrigin =
+      (typeof publicOriginRaw === "string" && publicOriginRaw.trim()) ||
+      "https://shop-ai.cc";
     try {
-      const u = new URL(apiOrigin.trim());
+      const u = new URL(publicOrigin);
       const wsProto = u.protocol === "https:" ? "wss:" : "ws:";
-      const portPart = u.port ? `:${u.port}` : "";
-      return `${wsProto}//${u.hostname}${portPart}/api/v1/video-tasks/stream`;
+      const port = u.port ? `:${u.port}` : "";
+      return `${wsProto}//${u.hostname}${port}/api/v1/video-tasks/stream`;
     } catch {
-      // ignore
+      return "wss://shop-ai.cc/api/v1/video-tasks/stream";
     }
   }
 
-  if (typeof window === "undefined") return "";
   const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${wsProto}//${window.location.host}/api/video-tasks/stream`;
+  return `${wsProto}//${window.location.host}/api/v1/video-tasks/stream`;
 }
 
 /**
@@ -206,6 +217,145 @@ function parseGenerateBootstrap(raw) {
   if (!raw || typeof raw !== "object") return null;
   if (!raw.createPayload || typeof raw.createPayload !== "object") return null;
   return raw;
+}
+
+const BOOTSTRAP_FOLLOW_UP_PROMPT =
+  "您对于视频生成有什么想法？（视频剧情、视频氛围、上传参考图）";
+
+/** 纯文本备份（复制、无障碍说明） */
+function buildBootstrapPlainCopyText(createPayload) {
+  const trend = createPayload?.trend;
+  const product = createPayload?.product;
+  const lines = ["您当前从生成页带入的上下文："];
+
+  const title = typeof trend?.title === "string" ? trend.title.trim() : "";
+  const summaryRaw = typeof trend?.summary === "string" ? trend.summary.trim() : "";
+  const summary = summaryRaw && summaryRaw !== title ? summaryRaw : "";
+  const tags =
+    Array.isArray(trend?.tags) ? trend.tags.filter(Boolean).slice(0, 12).map(String) : [];
+
+  if (title || summary || tags.length) {
+    lines.push("");
+    lines.push("[热点]");
+    if (title) lines.push(title);
+    if (summary) lines.push(summary);
+    if (tags.length) lines.push(`标签：${tags.join("、")}`);
+  } else {
+    lines.push("", "[热点]", "（暂无）");
+  }
+
+  const pName = typeof product?.name === "string" ? product.name.trim() : "";
+  const pPrice =
+    product?.price != null && product.price !== "" ? String(product.price) : "";
+  if (pName || pPrice) {
+    lines.push("");
+    lines.push("[推广产品]");
+    if (pName) lines.push(pName);
+    if (pPrice) lines.push(`价格：${pPrice}`);
+  } else {
+    lines.push("", "[推广产品]", "（暂无）");
+  }
+
+  return lines.filter((l, i) => !(l === "" && i === lines.length - 1)).join("\n");
+}
+
+function VideoChatBootstrapContextCard({ context }) {
+  const trend = context?.trend;
+  const product = context?.product;
+
+  const title = typeof trend?.title === "string" ? trend.title.trim() : "";
+  const summaryRaw = typeof trend?.summary === "string" ? trend.summary.trim() : "";
+  const showSummary =
+    Boolean(summaryRaw) && summaryRaw !== title;
+  const tags =
+    Array.isArray(trend?.tags) ? trend.tags.filter(Boolean).slice(0, 12).map(String) : [];
+
+  const pName = typeof product?.name === "string" ? product.name.trim() : "";
+  const img =
+    typeof product?.image_url === "string"
+      ? product.image_url.trim()
+      : "";
+  let priceNum = "";
+  if (product?.price != null && product.price !== "") {
+    priceNum = String(product.price).trim();
+  }
+
+  const hasHotspotBlock = Boolean(title || showSummary || tags.length > 0);
+  const hasProductBlock = Boolean(pName || img || priceNum);
+
+  return (
+    <div className="video-chat-bootstrap" role="article" aria-label="来自生成页的上下文预览">
+      <div className="video-chat-bootstrap__intro">已从生成页为你带入以下内容，可直接在下方说说你的视频想法～</div>
+
+      {hasHotspotBlock && (
+        <section className="video-chat-bootstrap__section" aria-label="热点">
+          <div className="video-chat-bootstrap__section-label">热点</div>
+          {title ? <h3 className="video-chat-bootstrap__hotspot-title">{title}</h3> : null}
+          {showSummary ? (
+            <p className="video-chat-bootstrap__hotspot-summary">{summaryRaw}</p>
+          ) : null}
+          {tags.length > 0 ? (
+            <ul className="video-chat-bootstrap__tags" aria-label="标签">
+              {tags.map((t) => (
+                <li key={t} className="video-chat-bootstrap__tag">
+                  {t}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      )}
+
+      {hasProductBlock && (
+        <section className="video-chat-bootstrap__section" aria-label="推广产品">
+          <div className="video-chat-bootstrap__section-label">推广产品</div>
+          <div className="video-chat-bootstrap__product">
+            {img ? (
+              <div className="video-chat-bootstrap__product-thumb">
+                <img src={img} alt="" loading="lazy" decoding="async" />
+              </div>
+            ) : (
+              <div className="video-chat-bootstrap__product-thumb video-chat-bootstrap__product-thumb--empty" aria-hidden />
+            )}
+            <div className="video-chat-bootstrap__product-body">
+              {pName ? (
+                <div className="video-chat-bootstrap__product-name">{pName}</div>
+              ) : (
+                <div className="video-chat-bootstrap__product-name video-chat-bootstrap__muted">（未命名商品）</div>
+              )}
+              {priceNum ? (
+                <div className="video-chat-bootstrap__product-price">
+                  <span className="video-chat-bootstrap__price-value">¥{priceNum}</span>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {!hasHotspotBlock && !hasProductBlock ? (
+        <p className="video-chat-bootstrap__muted">暂无可展示的上下文，可在下方直接描述你的视频需求。</p>
+      ) : null}
+    </div>
+  );
+}
+
+/** 根据生成页传入的 createPayload 生成欢迎后的两条助手消息（热点卡片 + 产品卡片 + 引导提问） */
+function buildBootstrapContextAssistantMessages(createPayload) {
+  const copyText = buildBootstrapPlainCopyText(createPayload);
+  const trend = createPayload?.trend;
+  const product = createPayload?.product;
+
+  return [
+    {
+      id: uid(),
+      role: "assistant",
+      content: copyText,
+      copyText,
+      bootstrapContext: { trend, product },
+    },
+    { id: uid(), role: "assistant", content: BOOTSTRAP_FOLLOW_UP_PROMPT },
+  ];
 }
 
 /** 线程视图 / progress SSE → 聊天区多行文案（与后端 FrontendViewState、progress 事件对齐） */
@@ -336,35 +486,17 @@ export default function VideoChatPage() {
   const sidebarUserInitial = sidebarUserName.trim().charAt(0) || "商";
 
   const openParamModal = () => {
-    setParamDraft(cloneVideoParams(videoParams));
+    setParamDraft(cloneVideoParams({ ...videoParams, generationMode: "multimodal_reference" }));
     setParamModalOpen(true);
   };
 
   const saveVideoParams = () => {
-    if (paramDraft.generationMode === "reference_to_video" && !paramDraft.referenceUsageDescription.trim()) {
-      antMessage.warning("参考图模式下请填写各参考图的用途说明（如：图1 为…）");
-      return;
-    }
-    if (paramDraft.generationMode === "first_last_frame") {
-      const hasFirst = paramDraft.firstFrameList?.length > 0;
-      const hasLast = paramDraft.lastFrameList?.length > 0;
-      if (!hasFirst && !hasLast) {
-        antMessage.warning("首尾帧模式请至少上传首帧或尾帧之一");
-        return;
-      }
-    }
-    setVideoParams(cloneVideoParams(paramDraft));
+    setVideoParams(cloneVideoParams({ ...paramDraft, generationMode: "multimodal_reference" }));
     setParamModalOpen(false);
     antMessage.success("视频参数已保存");
   };
 
-  const paramSummary = `${videoParams.resolution} · ${videoParams.ratio} · ${
-    videoParams.generationMode === "text_to_video"
-      ? "文字"
-      : videoParams.generationMode === "reference_to_video"
-        ? "参考图"
-        : "首尾帧"
-  }`;
+  const paramSummary = `${videoParams.resolution} · ${videoParams.ratio} · 多模态`;
 
   const messages = messagesBySession[activeSessionId] ?? EMPTY_MESSAGES;
   const activeThreadId = threadBySession[activeSessionId] || "";
@@ -443,8 +575,6 @@ export default function VideoChatPage() {
   const generationToSegmentBySessionRef = useRef({});
   const segmentCacheBySessionRef = useRef({});
   const generateBootstrapRef = useRef(null);
-  const generateBootstrapSessionRef = useRef("");
-  const generateBootstrapConsumedRef = useRef(false);
 
   useEffect(() => {
     threadViewBySessionRef.current = threadViewBySession;
@@ -561,15 +691,20 @@ export default function VideoChatPage() {
 
     const incoming = fromLocation || fromStorage;
     if (!incoming) return;
-    if (generateBootstrapConsumedRef.current) return;
     if (generateBootstrapRef.current) return;
 
     generateBootstrapRef.current = incoming;
+    try {
+      sessionStorage.removeItem(VIDEO_CHAT_BOOTSTRAP_KEY);
+    } catch {
+      // ignore
+    }
 
     if (incoming.videoParams && typeof incoming.videoParams === "object") {
       const normalizedParams = cloneVideoParams({
         ...DEFAULT_VIDEO_PARAMS,
         ...incoming.videoParams,
+        generationMode: "multimodal_reference",
       });
       setVideoParams(normalizedParams);
       setParamDraft(normalizedParams);
@@ -588,13 +723,11 @@ export default function VideoChatPage() {
         {
           id: uid(),
           role: "assistant",
-          content: incoming?.skipAutoCreateThread
-            ? "已接收上一步的热点与商品配置。尚未自动创建任务，你可以在下方输入或操作以开始生成。"
-            : "已接收上一步配置，正在创建视频线程并开始监听进度。",
+          content: WELCOME_TEXT,
         },
+        ...buildBootstrapContextAssistantMessages(incoming.createPayload),
       ],
     }));
-    generateBootstrapSessionRef.current = sessionId;
   }, [location.state]);
 
   useEffect(() => {
@@ -658,17 +791,9 @@ export default function VideoChatPage() {
       wsOpenedRef.current = false;
 
       socket.onopen = () => {
-        setWsConnected(true);
         antMessage.success("实时连接已建立");
+        setWsConnected(true);
         wsOpenedRef.current = true;
-        // 在聊天区追加系统提示，避免 toast 太快错过
-        setMessagesBySession((prev) => {
-          const list = prev[activeSessionId] || [];
-          return {
-            ...prev,
-            [activeSessionId]: [...list, { id: uid(), role: "assistant", content: "系统提示：实时连接已建立。" }],
-          };
-        });
       };
 
       socket.onmessage = (event) => {
@@ -890,7 +1015,7 @@ export default function VideoChatPage() {
     (text) => {
       const payload = deepCloneJson(DEMO_CREATE_THREAD_PAYLOAD);
       payload.user_input = text || payload.user_input;
-      payload.generation_mode = UI_MODE_TO_BACKEND_MODE[videoParams.generationMode] || "text_to_video";
+      payload.generation_mode = BACKEND_GENERATION_MODE_MULTIMODAL;
       // 先复用当前页面参数，后续你可替换成真正参数表单映射。
       payload.config_params = {
         resolution: videoParams.resolution,
@@ -1099,30 +1224,6 @@ export default function VideoChatPage() {
     },
     [appendAssistantMessage, fetchThreadStateOnce, navigate, startThreadStream, tryAppendThreadViewProgressChat]
   );
-
-  useEffect(() => {
-    if (authChecking || !currentUser) return;
-    if (generateBootstrapConsumedRef.current) return;
-
-    const bootstrap = generateBootstrapRef.current;
-    const sessionId = generateBootstrapSessionRef.current;
-    if (!bootstrap || !sessionId) return;
-
-    generateBootstrapConsumedRef.current = true;
-    try {
-      sessionStorage.removeItem(VIDEO_CHAT_BOOTSTRAP_KEY);
-    } catch {
-      // ignore
-    }
-    if (bootstrap.skipAutoCreateThread) {
-      return;
-    }
-    void createVideoThread(
-      sessionId,
-      bootstrap.createPayload,
-      "已同步生成页参数，线程创建成功，开始监听进度…",
-    );
-  }, [authChecking, createVideoThread, currentUser]);
 
   const resumeVideoThread = useCallback(
     async (sessionId, payload) => {
@@ -1477,10 +1578,21 @@ export default function VideoChatPage() {
               <div key={m.id} className={`video-chat-msg video-chat-msg--${m.role}`}>
                 {m.role === "assistant" && <div className="video-chat-msg__role">助手</div>}
                 <div className="video-chat-msg__bubble">
-                  <div className="video-chat-msg__content">{m.content}</div>
+                  <div className="video-chat-msg__content">
+                    {m.bootstrapContext ? (
+                      <VideoChatBootstrapContextCard context={m.bootstrapContext} />
+                    ) : (
+                      m.content
+                    )}
+                  </div>
                   {m.role === "assistant" && (
                     <div className="video-chat-msg__actions">
-                      <button type="button" className="video-chat-msg__action" aria-label="复制" onClick={() => handleCopy(m.content)}>
+                      <button
+                        type="button"
+                        className="video-chat-msg__action"
+                        aria-label="复制"
+                        onClick={() => handleCopy(typeof m.copyText === "string" ? m.copyText : m.content)}
+                      >
                         <CopyOutlined />
                       </button>
                       <button
@@ -1708,71 +1820,12 @@ export default function VideoChatPage() {
             />
           </div>
 
-          <div className="video-chat-param-block">
-            <span className="video-chat-param-label video-chat-param-label--block">视频生成模式</span>
-            <Radio.Group
-              value={paramDraft.generationMode}
-              onChange={(e) => setParamDraft((p) => ({ ...p, generationMode: e.target.value }))}
-              className="video-chat-param-radio-group"
-            >
-              {GENERATION_MODE_OPTIONS.map((opt) => (
-                <Radio key={opt.value} value={opt.value}>
-                  {opt.label}
-                </Radio>
-              ))}
-            </Radio.Group>
+          <div className="video-chat-param-row">
+            <span className="video-chat-param-label">视频生成模式</span>
+            <span className="video-chat-param-readonly" style={{ color: "rgba(0,0,0,0.65)" }}>
+              多模态生成（固定，文案与参考素材由模型统一理解）
+            </span>
           </div>
-
-          {paramDraft.generationMode === "reference_to_video" && (
-            <div className="video-chat-param-block">
-              <label className="video-chat-param-label video-chat-param-label--block" htmlFor="vp-ref-usage">
-                参考图用途说明
-              </label>
-              <p className="video-chat-param-hint">支持 1～4 张参考图；请说明每张图的用途，例如：图1 产品主图，图2 场景氛围，图3 …</p>
-              <Input.TextArea
-                id="vp-ref-usage"
-                rows={4}
-                value={paramDraft.referenceUsageDescription}
-                onChange={(e) => setParamDraft((p) => ({ ...p, referenceUsageDescription: e.target.value }))}
-                placeholder="图1：…&#10;图2：…"
-              />
-            </div>
-          )}
-
-          {paramDraft.generationMode === "first_last_frame" && (
-            <div className="video-chat-param-block">
-              <span className="video-chat-param-label video-chat-param-label--block">首尾帧图片</span>
-              <p className="video-chat-param-hint">至少上传首帧或尾帧之一；可同时上传两张以控制起止画面（仅本地预览，未上传服务器）。</p>
-              <div className="video-chat-param-uploads">
-                <div>
-                  <div className="video-chat-param-upload-title">首帧</div>
-                  <Upload
-                    accept="image/*"
-                    maxCount={1}
-                    fileList={paramDraft.firstFrameList}
-                    beforeUpload={() => false}
-                    onChange={({ fileList }) => setParamDraft((p) => ({ ...p, firstFrameList: fileList.slice(-1) }))}
-                    onRemove={() => setParamDraft((p) => ({ ...p, firstFrameList: [] }))}
-                  >
-                    <Button size="small">选择图片</Button>
-                  </Upload>
-                </div>
-                <div>
-                  <div className="video-chat-param-upload-title">尾帧</div>
-                  <Upload
-                    accept="image/*"
-                    maxCount={1}
-                    fileList={paramDraft.lastFrameList}
-                    beforeUpload={() => false}
-                    onChange={({ fileList }) => setParamDraft((p) => ({ ...p, lastFrameList: fileList.slice(-1) }))}
-                    onRemove={() => setParamDraft((p) => ({ ...p, lastFrameList: [] }))}
-                  >
-                    <Button size="small">选择图片</Button>
-                  </Upload>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </Modal>
     </>

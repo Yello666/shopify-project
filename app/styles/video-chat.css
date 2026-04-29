@@ -434,6 +434,146 @@
   word-break: break-word;
 }
 
+.video-chat-msg__content .video-chat-bootstrap {
+  white-space: normal;
+}
+
+/* 生成页带入上下文：热点 + 精简商品卡 */
+.video-chat-bootstrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 100%;
+}
+
+.video-chat-bootstrap__intro {
+  font-size: 13px;
+  color: var(--dash-muted);
+  line-height: 1.5;
+}
+
+.video-chat-bootstrap__section {
+  background: linear-gradient(180deg, #f8faff 0%, #fff 48%);
+  border: 1px solid rgba(77, 105, 250, 0.12);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.video-chat-bootstrap__section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7c8ab5;
+  margin-bottom: 8px;
+}
+
+.video-chat-bootstrap__hotspot-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--dash-text);
+}
+
+.video-chat-bootstrap__hotspot-summary {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #4f5669;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+
+.video-chat-bootstrap__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.video-chat-bootstrap__tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #4d5a8f;
+  background: rgba(77, 105, 250, 0.1);
+  border: 1px solid rgba(77, 105, 250, 0.15);
+}
+
+.video-chat-bootstrap__product {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.video-chat-bootstrap__product-thumb {
+  flex-shrink: 0;
+  width: 88px;
+  height: 88px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #eef1f9, #e8eaf2);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.video-chat-bootstrap__product-thumb--empty {
+  background: repeating-linear-gradient(
+    -45deg,
+    #eceff5,
+    #eceff5 8px,
+    #e8ebf3 8px,
+    #e8ebf3 16px
+  );
+}
+
+.video-chat-bootstrap__product-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.video-chat-bootstrap__product-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.video-chat-bootstrap__product-name {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--dash-text);
+}
+
+.video-chat-bootstrap__product-price {
+  font-size: 13px;
+}
+
+.video-chat-bootstrap__price-value {
+  font-weight: 700;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  color: #c45b2c;
+  letter-spacing: 0.02em;
+}
+
+.video-chat-bootstrap__muted {
+  margin: 0;
+  font-size: 13px;
+  color: var(--dash-muted);
+}
+
 .video-chat-msg__actions {
   display: flex;
   gap: 2px;

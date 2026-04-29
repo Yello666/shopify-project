@@ -5,7 +5,7 @@ import { authenticate } from "../shopify.server";
 import { Button, Tag, Space, message, Input, Card, Spin, Modal, Descriptions } from "antd";
 import { authFetch } from "../utils/auth-api";
 
-const MERCHANT_API_BASE = "/api/merchant";
+const MERCHANT_API_BASE = "/api/v1/merchant";
 
 function formatTags(tags) {
   if (!Array.isArray(tags) || tags.length === 0) return null;
@@ -228,7 +228,7 @@ export default function Match() {
     setError(null);
     setResults([]);
     try {
-      const res = await authFetch("/api/hotspot/match", {
+      const res = await authFetch("/api/v1/hotspot/match", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

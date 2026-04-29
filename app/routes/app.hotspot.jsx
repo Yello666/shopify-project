@@ -416,7 +416,7 @@ export default function Hotspot() {
     }
 
     try {
-      const res = await authFetch("/api/hotspot/hot-trends", {
+      const res = await authFetch("/api/v1/hotspot/hot-trends", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -463,7 +463,7 @@ export default function Hotspot() {
   const loadRecommendScheduleState = useCallback(async () => {
     setScheduleLoading(true);
     try {
-      const res = await authFetch("/api/hotspot/recommend-email/schedule");
+      const res = await authFetch("/api/v1/hotspot/recommend-email/schedule");
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = json?.detail ?? json?.message;
@@ -552,7 +552,7 @@ export default function Hotspot() {
     }
     setRecommendSubmitting(true);
     try {
-      const res = await authFetch("/api/hotspot/recommend", {
+      const res = await authFetch("/api/v1/hotspot/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -621,7 +621,7 @@ export default function Hotspot() {
         timezone: scheduleDraft.timezone || DEFAULT_SCHEDULE_STATE.timezone,
       };
 
-      const res = await authFetch("/api/hotspot/recommend-email/schedule", {
+      const res = await authFetch("/api/v1/hotspot/recommend-email/schedule", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

@@ -5,7 +5,7 @@ import { authenticate } from "../shopify.server";
 import { Button, Input, message, Spin, Descriptions, Tag } from "antd";
 import { authFetch } from "../utils/auth-api";
 
-const MERCHANT_API_BASE = "/api/merchant";
+const MERCHANT_API_BASE = "/api/v1/merchant";
 
 export const loader = async ({ request }) => {
   try {

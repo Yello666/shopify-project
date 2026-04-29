@@ -5,7 +5,7 @@ import { authenticate } from "../shopify.server";
 import { Button, Empty, Input, Space, Spin, Table, Tag, message } from "antd";
 import { authFetch } from "../utils/auth-api";
 
-const PRODUCTS_API_BASE = "/api/products";
+const PRODUCTS_API_BASE = "/api/v1/products";
 
 function parseProductListResponse(json) {
   const rows = Array.isArray(json?.data)

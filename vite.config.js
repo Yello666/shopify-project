@@ -19,6 +19,14 @@ const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost")
   .hostname;
 let hmrConfig;
 
+/** `/api/v1/*` 代理目标（含 WebSocket）；本地联调：`VITE_API_PROXY_TARGET=http://127.0.0.1:8000`。 */
+const API_PROXY_TARGET =
+  process.env.VITE_API_PROXY_TARGET?.trim() || "https://shop-ai.xin";
+const API_PROXY_SECURE =
+  process.env.VITE_API_PROXY_INSECURE_SSL === "1"
+    ? false
+    : API_PROXY_TARGET.startsWith("https:");
+
 if (host === "localhost") {
   hmrConfig = {
     protocol: "ws",
@@ -43,16 +51,14 @@ export default defineConfig({
     },
     port: Number(process.env.PORT || 3000),
     hmr: hmrConfig,
-    // 仅 shopify app dev / Vite：把同源 /api/* 转到后端 shop-ai.xin（与前端 fetch 路径一致）
-    // 生产环境由 Nginx 等做 /api/ → 上游，不经过 Vite
+    // shopify app dev：同源 `/api/v1/*` 原样转到后端（与生产网关路径一致）；WS 同上。
     proxy: {
-      "/api": {
+      "/api/v1": {
         //选择本地开发环境和线上环境
        target: "https://shop-ai.xin",
        //target: "http://localhost:8000",
         changeOrigin: true,
         ws: true,
-        rewrite: (path) => path.replace(/^\/api\//, "/api/v1/"),
       },
     },
     fs: {

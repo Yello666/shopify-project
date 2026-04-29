@@ -6,8 +6,8 @@ import { Button, Select, message, Card, Tag, Space } from "antd";
 import { VideoCameraOutlined } from "@ant-design/icons";
 import { authFetch } from "../utils/auth-api";
 
-const MERCHANT_API_BASE = "/api/merchant";
-const PRODUCTS_API_BASE = "/api/products";
+const MERCHANT_API_BASE = "/api/v1/merchant";
+const PRODUCTS_API_BASE = "/api/v1/products";
 const VIDEO_CHAT_BOOTSTRAP_KEY = "video_chat_bootstrap_v1";
 /** 本页已隐藏比例/时长/模式选择，提交时使用以下默认 */
 const DEFAULT_GENERATION_DURATION_SEC = 5;
@@ -266,7 +266,7 @@ export default function Generate() {
       brand: brandPayload,
       product: productPayload,
       user_input: `围绕热点「${hotspot?.title || "当前热点"}」制作约 ${DEFAULT_GENERATION_DURATION_SEC} 秒的营销视频`,
-      generation_mode: "text_to_video",
+      generation_mode: "multimodal_reference",
       media_assets: null,
       config_params: {
         resolution: "720p",
@@ -281,8 +281,6 @@ export default function Generate() {
     try {
       const bootstrap = {
         source: "generate",
-        /** 仅进入视频页，由用户在对话中再发起创建，不自动调创建线程接口 */
-        skipAutoCreateThread: true,
         createdAt: Date.now(),
         title: `${selectedProduct.title || "商品"} · ${hotspot?.title || "热点视频"}`,
         createPayload,
@@ -291,7 +289,7 @@ export default function Generate() {
           ratio: DEFAULT_VIDEO_RATIO,
           watermark: false,
           generateAudio: true,
-          generationMode: "text_to_video",
+          generationMode: "multimodal_reference",
           referenceUsageDescription: "",
           responseLang: "zh",
           firstFrameList: [],
