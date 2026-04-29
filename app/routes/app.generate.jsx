@@ -2,14 +2,16 @@ import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Button, Input, Select, Upload, message, Card, Tag, Space, Divider } from "antd";
-import { UploadOutlined, VideoCameraOutlined } from "@ant-design/icons";
+import { Button, Select, message, Card, Tag, Space } from "antd";
+import { VideoCameraOutlined } from "@ant-design/icons";
 import { authFetch } from "../utils/auth-api";
 
 const MERCHANT_API_BASE = "/api/merchant";
 const PRODUCTS_API_BASE = "/api/products";
-const CONTENT_API_BASE = "/api/content";
 const VIDEO_CHAT_BOOTSTRAP_KEY = "video_chat_bootstrap_v1";
+/** 本页已隐藏比例/时长/模式选择，提交时使用以下默认 */
+const DEFAULT_GENERATION_DURATION_SEC = 5;
+const DEFAULT_VIDEO_RATIO = "16:9";
 
 function parseProductListResponse(json) {
   const rows = Array.isArray(json?.data)
@@ -61,20 +63,6 @@ function toSafePrice(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function toUiGenerationMode(generationType) {
-  if (generationType === "image_to_video" || generationType === "ref_to_video") {
-    return "reference_to_video";
-  }
-  return "text_to_video";
-}
-
-function toBackendGenerationMode(generationType) {
-  if (generationType === "image_to_video" || generationType === "ref_to_video") {
-    return "image_to_video";
-  }
-  return "text_to_video";
-}
-
 function toAudienceList(value) {
   if (Array.isArray(value)) {
     return value.map((v) => String(v || "").trim()).filter(Boolean);
@@ -107,14 +95,6 @@ export default function Generate() {
   const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [loadingProductDetail, setLoadingProductDetail] = useState(false);
-
-  // 生成配置
-  const [generationType, setGenerationType] = useState("text_to_video");
-  const [duration, setDuration] = useState(5);
-  const [ratio, setRatio] = useState("16:9");
-  const [userPrompt, setUserPrompt] = useState("");
-  const [imageUrls, setImageUrls] = useState([]);
-  const [uploadingImage, setUploadingImage] = useState(false);
 
   // 页面跳转状态
   const [submitting, setSubmitting] = useState(false);
@@ -214,45 +194,6 @@ export default function Generate() {
     }
   };
 
-  // 上传参考图
-  const handleUpload = async (file) => {
-    setUploadingImage(true);
-    try {
-      const formData = new FormData();
-      formData.append("image", file);
-      const res = await authFetch(`${CONTENT_API_BASE}/upload-reference-image`, {
-        method: "POST",
-        body: formData,
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        message.error(json?.detail || "上传失败");
-        return false;
-      }
-      const imageUrl = json?.data?.image_url || "";
-      if (imageUrl) {
-        setImageUrls((prev) => [...prev, imageUrl]);
-        message.success("图片上传成功");
-      }
-    } catch (e) {
-      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-        message.warning("登录已过期，请重新登录");
-        navigate("/app");
-      } else {
-        message.error(e instanceof Error ? e.message : "上传失败");
-      }
-    } finally {
-      setUploadingImage(false);
-    }
-    return false; // 阻止默认上传
-  };
-
-  // 移除已上传图片
-  const handleRemoveImage = (url) => {
-    setImageUrls((prev) => prev.filter((u) => u !== url));
-  };
-
-  // 提交生成任务
   const handleSubmit = () => {
     if (loadingProductDetail) {
       message.info("商品详情加载中，请稍候");
@@ -260,10 +201,6 @@ export default function Generate() {
     }
     if (!selectedProduct?.id) {
       message.warning("请选择一个商品");
-      return;
-    }
-    if (generationType !== "text_to_video" && imageUrls.length === 0) {
-      message.warning("图生视频模式需要上传至少一张参考图");
       return;
     }
     const productIdNum = Number(selectedProduct.id);
@@ -328,14 +265,12 @@ export default function Generate() {
       },
       brand: brandPayload,
       product: productPayload,
-      user_input: userPrompt.trim() || `围绕热点「${hotspot?.title || "当前热点"}」制作约 ${duration} 秒的营销视频`,
-      generation_mode: toBackendGenerationMode(generationType),
-      media_assets: generationType === "text_to_video" ? null : {
-        ref_image_urls: imageUrls,
-      },
+      user_input: `围绕热点「${hotspot?.title || "当前热点"}」制作约 ${DEFAULT_GENERATION_DURATION_SEC} 秒的营销视频`,
+      generation_mode: "text_to_video",
+      media_assets: null,
       config_params: {
         resolution: "720p",
-        ratio,
+        ratio: DEFAULT_VIDEO_RATIO,
         language: "zh",
         watermark: false,
         generate_audio: true,
@@ -346,15 +281,17 @@ export default function Generate() {
     try {
       const bootstrap = {
         source: "generate",
+        /** 仅进入视频页，由用户在对话中再发起创建，不自动调创建线程接口 */
+        skipAutoCreateThread: true,
         createdAt: Date.now(),
         title: `${selectedProduct.title || "商品"} · ${hotspot?.title || "热点视频"}`,
         createPayload,
         videoParams: {
           resolution: "720p",
-          ratio,
+          ratio: DEFAULT_VIDEO_RATIO,
           watermark: false,
           generateAudio: true,
-          generationMode: toUiGenerationMode(generationType),
+          generationMode: "text_to_video",
           referenceUsageDescription: "",
           responseLang: "zh",
           firstFrameList: [],
@@ -502,118 +439,13 @@ export default function Generate() {
                 />
               </div>
 
-              <Divider style={{ margin: "12px 0" }} />
-
-              <div className="ant-form-row">
-                <span className="ant-form-label">生成模式</span>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {[
-                    { value: "text_to_video", label: "文生视频", desc: "纯文字生成视频" },
-                    { value: "image_to_video", label: "图生视频", desc: "上传图片生成视频" },
-                    { value: "ref_to_video", label: "参考图生视频", desc: "多张参考图生成视频" },
-                  ].map((opt) => (
-                    <Card
-                      key={opt.value}
-                      size="small"
-                      hoverable
-                      onClick={() => setGenerationType(opt.value)}
-                      style={{
-                        cursor: "pointer",
-                        border: generationType === opt.value ? "2px solid #1890ff" : "1px solid #f0f0f0",
-                        width: 140,
-                      }}
-                    >
-                      <div style={{ textAlign: "center" }}>
-                        <div style={{ fontWeight: 600 }}>{opt.label}</div>
-                        <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>{opt.desc}</div>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-
-              {(generationType === "image_to_video" || generationType === "ref_to_video") && (
-                <div className="ant-form-row">
-                  <span className="ant-form-label">上传参考图</span>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                    {imageUrls.map((url) => (
-                      <div key={url} style={{ position: "relative" }}>
-                        <img
-                          src={url}
-                          alt="参考图"
-                          style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 8, border: "1px solid #f0f0f0" }}
-                        />
-                        <Button
-                          type="text"
-                          size="small"
-                          danger
-                          onClick={() => handleRemoveImage(url)}
-                          style={{ position: "absolute", top: -8, right: -8, padding: 0 }}
-                        >
-                          ✕
-                        </Button>
-                      </div>
-                    ))}
-                    <Upload beforeUpload={handleUpload} showUploadList={false} accept="image/jpeg,image/png,image/webp">
-                      <Button icon={<UploadOutlined />} loading={uploadingImage}>
-                        {imageUrls.length === 0 ? "上传图片" : "继续添加"}
-                      </Button>
-                    </Upload>
-                  </div>
-                  <div style={{ fontSize: 12, color: "#999" }}>
-                    支持 JPG、PNG、WebP 格式，{generationType === "ref_to_video" ? "建议上传 2~4 张参考图" : "至少上传 1 张图片"}
-                  </div>
-                </div>
-              )}
-
-              <div className="ant-form-row">
-                <label className="ant-form-label" htmlFor="select-ratio">视频比例</label>
-                <Select
-                  id="select-ratio"
-                  value={ratio}
-                  onChange={setRatio}
-                  options={[
-                    { value: "16:9", label: "16:9 横版" },
-                    { value: "9:16", label: "9:16 竖版（推荐社交媒体）" },
-                    { value: "1:1", label: "1:1 方形" },
-                  ]}
-                  style={{ width: 220 }}
-                />
-              </div>
-
-              <div className="ant-form-row">
-                <label className="ant-form-label" htmlFor="select-duration">视频时长</label>
-                <Select
-                  id="select-duration"
-                  value={duration}
-                  onChange={setDuration}
-                  options={[
-                    { value: 5, label: "5 秒" },
-                    { value: 10, label: "10 秒" },
-                    { value: 12, label: "12 秒（最长）" },
-                  ]}
-                  style={{ width: 160 }}
-                />
-              </div>
-
-              <div className="ant-form-row">
-                <label className="ant-form-label ant-form-label--opt" htmlFor="input-prompt">补充描述（选填）</label>
-                <Input.TextArea
-                  id="input-prompt"
-                  value={userPrompt}
-                  onChange={(e) => setUserPrompt(e.target.value)}
-                  placeholder="补充你想要的视频风格、内容要求等，例如：适合抖音风格、有节奏感的背景音乐"
-                  rows={2}
-                />
-              </div>
-
               <div style={{ marginTop: 16 }}>
                 <Button
                   type="primary"
                   size="large"
                   loading={submitting}
                   onClick={handleSubmit}
-                  disabled={!selectedProduct || loadingProductDetail || (generationType !== "text_to_video" && imageUrls.length === 0)}
+                  disabled={!selectedProduct || loadingProductDetail}
                   icon={<VideoCameraOutlined />}
                 >
                   开始生成

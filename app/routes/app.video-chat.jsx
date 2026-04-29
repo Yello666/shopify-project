@@ -588,7 +588,9 @@ export default function VideoChatPage() {
         {
           id: uid(),
           role: "assistant",
-          content: "已接收上一步配置，正在创建视频线程并开始监听进度。",
+          content: incoming?.skipAutoCreateThread
+            ? "已接收上一步的热点与商品配置。尚未自动创建任务，你可以在下方输入或操作以开始生成。"
+            : "已接收上一步配置，正在创建视频线程并开始监听进度。",
         },
       ],
     }));
@@ -1107,16 +1109,19 @@ export default function VideoChatPage() {
     if (!bootstrap || !sessionId) return;
 
     generateBootstrapConsumedRef.current = true;
-    void createVideoThread(
-      sessionId,
-      bootstrap.createPayload,
-      "已同步生成页参数，线程创建成功，开始监听进度…",
-    );
     try {
       sessionStorage.removeItem(VIDEO_CHAT_BOOTSTRAP_KEY);
     } catch {
       // ignore
     }
+    if (bootstrap.skipAutoCreateThread) {
+      return;
+    }
+    void createVideoThread(
+      sessionId,
+      bootstrap.createPayload,
+      "已同步生成页参数，线程创建成功，开始监听进度…",
+    );
   }, [authChecking, createVideoThread, currentUser]);
 
   const resumeVideoThread = useCallback(
