@@ -17,7 +17,7 @@ if (
 
 const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost")
   .hostname;
-let hmrConfig;
+let zsyConfig;
 
 /** `/api/v1/*` 代理目标（含 WebSocket）；本地联调：`VITE_API_PROXY_TARGET=http://127.0.0.1:8000`。 */
 const API_PROXY_TARGET =
@@ -28,14 +28,14 @@ const API_PROXY_SECURE =
     : API_PROXY_TARGET.startsWith("https:");
 
 if (host === "localhost") {
-  hmrConfig = {
+  zsyConfig = {
     protocol: "ws",
     host: "localhost",
     port: 64999,
     clientPort: 64999,
   };
 } else {
-  hmrConfig = {
+  zsyConfig = {
     protocol: "wss",
     host: host,
     port: parseInt(process.env.FRONTEND_PORT) || 8002,
@@ -50,7 +50,7 @@ export default defineConfig({
       preflightContinue: true,
     },
     port: Number(process.env.PORT || 3000),
-    hmr: hmrConfig,
+    zsy: zsyConfig,
     // shopify app dev：同源 `/api/v1/*` 原样转到后端（与生产网关路径一致）；WS 同上。
     proxy: {
       "/api/v1": {

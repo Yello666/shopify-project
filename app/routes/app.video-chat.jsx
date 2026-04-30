@@ -1157,11 +1157,11 @@ export default function VideoChatPage() {
   }, [activeSessionId]);
 
   useEffect(() => {
-    if (vcInit.hadSnapshot) return;
     const fromLocation = parseGenerateBootstrap(location.state?.generateBootstrap);
     let fromStorage = null;
 
     if (!fromLocation) {
+      if (vcInit.hadSnapshot) return;
       try {
         const raw = sessionStorage.getItem(VIDEO_CHAT_BOOTSTRAP_KEY);
         fromStorage = parseGenerateBootstrap(raw ? JSON.parse(raw) : null);
@@ -1172,13 +1172,22 @@ export default function VideoChatPage() {
 
     const incoming = fromLocation || fromStorage;
     if (!incoming) return;
-    if (generateBootstrapRef.current) return;
 
-    generateBootstrapRef.current = incoming;
+    const bootstrapFingerprint = `${incoming.createdAt || ""}|${incoming.title || ""}`;
+    if (generateBootstrapRef.current === bootstrapFingerprint) return;
+    generateBootstrapRef.current = bootstrapFingerprint;
+
     try {
       sessionStorage.removeItem(VIDEO_CHAT_BOOTSTRAP_KEY);
     } catch {
       // ignore
+    }
+
+    const prevSessionId = activeSessionIdRef.current;
+    const prevEs = threadStreamRef.current[prevSessionId];
+    if (prevEs) {
+      try { prevEs.close(); } catch { /* ignore */ }
+      delete threadStreamRef.current[prevSessionId];
     }
 
     if (incoming.videoParams && typeof incoming.videoParams === "object") {
@@ -1214,6 +1223,15 @@ export default function VideoChatPage() {
       ],
     }));
 
+    setThreadBySession((prev) => ({ ...prev, [sessionId]: "" }));
+    setThreadViewBySession((prev) => ({ ...prev, [sessionId]: null }));
+    setThreadRequestingBySession((prev) => ({ ...prev, [sessionId]: false }));
+    setGenerationToSegmentBySession((prev) => ({ ...prev, [sessionId]: {} }));
+    setSegmentCacheBySession((prev) => ({ ...prev, [sessionId]: [] }));
+    setSegmentDraftBySession((prev) => ({ ...prev, [sessionId]: {} }));
+    setSegmentDurationDraftBySession((prev) => ({ ...prev, [sessionId]: {} }));
+    setSegmentSubmittingBySession((prev) => ({ ...prev, [sessionId]: {} }));
+
     const productImageUrlRaw = incoming?.createPayload?.product?.image_url;
     const productNameRaw = incoming?.createPayload?.product?.name;
     const productImageUrl = typeof productImageUrlRaw === "string" ? productImageUrlRaw.trim() : "";
@@ -1226,6 +1244,8 @@ export default function VideoChatPage() {
         if (validateReferenceAggregates(next).ok) setPendingReferenceAssets(next);
       }
     }
+
+    setDraft("");
   }, [location.state, vcInit.hadSnapshot]);
 
   /** 从历史气泡中的「推广产品」同步首图 chip（会话切换或发送清空后仍可恢复）。 */
