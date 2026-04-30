@@ -252,29 +252,25 @@ function withCredentials(init = {}) {
 
 /**
  * Wrapper for authenticated API calls:
- * - prefers cookie session (httpOnly-compatible)
- * - falls back to Bearer token when required
- * - refreshes once on 401, then retries
+ * - When a client-readable access token exists (localStorage / non-httpOnly cookie), sends
+ *   `Authorization: Bearer` on the **first** request together with `credentials: "include"`,
+ *   so login works even if the mirrored `access_token` cookie is missing or not yet sent.
+ * - When no token is readable (e.g. httpOnly-only session), first request relies on cookies only.
+ * - On 401, refreshes once then retries (cookie first, then Bearer with new token).
  */
 export async function authFetch(input, init = {}) {
   const token = getAccessToken();
-  const firstResponse = await fetch(input, withCredentials(init));
-
-  if (firstResponse.status !== 401) {
-    return firstResponse;
-  }
-
-  if (token) {
-    const bearerResponse = await fetch(
-      input,
-      withCredentials({
+  const firstInit = token
+    ? withCredentials({
         ...init,
         headers: withAuthorization(init.headers, token),
       })
-    );
-    if (bearerResponse.status !== 401) {
-      return bearerResponse;
-    }
+    : withCredentials(init);
+
+  const firstResponse = await fetch(input, firstInit);
+
+  if (firstResponse.status !== 401) {
+    return firstResponse;
   }
 
   const refreshResult = await refreshAccessTokenOnce();

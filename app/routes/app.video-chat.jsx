@@ -3,15 +3,17 @@ import { useNavigate, useLocation } from "react-router";
 import "../styles/video-chat.css";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { authFetch, clearAuthTokens, getAccessToken } from "../utils/auth-api";
+import { authFetch, getAccessToken } from "../utils/auth-api";
 import {
   classifyReferenceFileStrict,
+  validateAudioFile,
+  validateImageFile,
   validateReferenceAggregates,
-  validateReferenceFileAndRead,
   validateRequestBodyUnderLimit,
+  validateVideoFile,
   REFERENCE_ASSETS_RULES_SECTIONS,
 } from "../utils/video-reference-validation";
-import { Button, Input, message as antMessage, Modal, Select, Switch, Tooltip } from "antd";
+import { Button, Input, InputNumber, message as antMessage, Modal, Select, Switch, Tooltip } from "antd";
 import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -147,8 +149,16 @@ function buildPendingMediaAssetsPayload(pending) {
       .map((x) => (x.dataUrl ? x.dataUrl : x.remoteUrl))
       .filter((u) => typeof u === "string" && u.trim());
   }
-  if (audios.length) assets.reference_audio_urls = audios.map((x) => x.dataUrl);
-  if (videos.length) assets.reference_video_urls = videos.map((x) => x.dataUrl);
+  if (audios.length) {
+    assets.reference_audio_urls = audios
+      .map((x) => (x.dataUrl ? x.dataUrl : x.remoteUrl))
+      .filter((u) => typeof u === "string" && u.trim());
+  }
+  if (videos.length) {
+    assets.reference_video_urls = videos
+      .map((x) => (x.dataUrl ? x.dataUrl : x.remoteUrl))
+      .filter((u) => typeof u === "string" && u.trim());
+  }
   return Object.keys(assets).length ? assets : null;
 }
 
@@ -186,6 +196,7 @@ const RESPONSE_LANG_OPTIONS = [
 ];
 const MERCHANT_API_BASE = "/api/v1/merchant";
 const VIDEO_THREAD_API_BASE = "/api/v1/video-thread";
+const UPLOAD_FILE_API = "/api/v1/upload/file";
 /** 与后端约定：统一多模态生成（文案、参考素材等由服务端一并理解） */
 const BACKEND_GENERATION_MODE_MULTIMODAL = "multimodal_reference";
 const VIDEO_CHAT_BOOTSTRAP_KEY = "video_chat_bootstrap_v1";
@@ -336,12 +347,14 @@ function serializePendingReferenceAssets(assets) {
       fileName: e?.file?.name || "",
       mime: e?.file?.type || "",
       dataUrl: e?.dataUrl || null,
+      remoteUrl: e?.remoteUrl || null,
       meta: e?.meta && typeof e.meta === "object" ? e.meta : {},
     })),
     videos: videos.map((e) => ({
       fileName: e?.file?.name || "",
       mime: e?.file?.type || "",
       dataUrl: e?.dataUrl || null,
+      remoteUrl: e?.remoteUrl || null,
       meta: e?.meta && typeof e.meta === "object" ? e.meta : {},
     })),
   };
@@ -376,6 +389,7 @@ function deserializePendingReferenceAssets(raw) {
           return {
             file: new File([], fileName, { type: mime }),
             dataUrl: typeof e?.dataUrl === "string" ? e.dataUrl : null,
+            remoteUrl: typeof e?.remoteUrl === "string" ? e.remoteUrl : null,
             meta: e?.meta && typeof e.meta === "object" ? e.meta : {},
           };
         })
@@ -384,6 +398,66 @@ function deserializePendingReferenceAssets(raw) {
     images: mapImages,
     audios: mapAv(raw.audios, "audio/*"),
     videos: mapAv(raw.videos, "video/*"),
+  };
+}
+
+async function validateReferenceFile(file, bucket) {
+  const blobUrl = URL.createObjectURL(file);
+  try {
+    if (bucket === "images") {
+      const r = await validateImageFile(file, blobUrl);
+      if (!r.ok) return { ok: false, errors: r.errors };
+      return { ok: true, errors: [], meta: r.meta };
+    }
+    if (bucket === "videos") {
+      const r = await validateVideoFile(file, blobUrl);
+      if (!r.ok) return { ok: false, errors: r.errors };
+      return { ok: true, errors: [], meta: r.meta };
+    }
+    if (bucket === "audios") {
+      const r = await validateAudioFile(file, blobUrl);
+      if (!r.ok) return { ok: false, errors: r.errors };
+      return { ok: true, errors: [], meta: r.meta };
+    }
+    return { ok: false, errors: ["未知素材类型"] };
+  } finally {
+    try {
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function extractUploadFileUrl(json) {
+  const url = json?.data?.url || json?.url;
+  return typeof url === "string" && url.trim() ? url.trim() : "";
+}
+
+async function uploadReferenceFile(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await authFetch(UPLOAD_FILE_API, {
+    method: "POST",
+    body: formData,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = json?.data?.message || json?.message || `上传失败: ${res.status}`;
+    throw new Error(detail);
+  }
+  if (json?.code != null && Number(json.code) !== 0) {
+    throw new Error(json?.message || "上传失败");
+  }
+
+  const url = extractUploadFileUrl(json);
+  if (!url) {
+    throw new Error("上传失败：接口未返回文件 URL");
+  }
+  return {
+    url,
+    key: typeof json?.data?.key === "string" ? json.data.key : "",
   };
 }
 
@@ -441,6 +515,7 @@ function buildDemoInitialState() {
     generationToSegmentBySession: {},
     segmentCacheBySession: {},
     segmentDraftBySession: {},
+    segmentDurationDraftBySession: {},
     segmentSubmittingBySession: {},
   };
 }
@@ -485,6 +560,10 @@ function hydrateFromSnapshotPayload(data) {
     segmentDraftBySession:
       data.segmentDraftBySession && typeof data.segmentDraftBySession === "object"
         ? data.segmentDraftBySession
+        : {},
+    segmentDurationDraftBySession:
+      data.segmentDurationDraftBySession && typeof data.segmentDurationDraftBySession === "object"
+        ? data.segmentDurationDraftBySession
         : {},
     segmentSubmittingBySession: {},
   };
@@ -546,6 +625,7 @@ function buildBootstrapPlainCopyText(createPayload) {
   return lines.filter((l, i) => !(l === "" && i === lines.length - 1)).join("\n");
 }
 
+/* eslint-disable react/prop-types */
 function VideoChatBootstrapContextCard({ context }) {
   const trend = context?.trend;
   const product = context?.product;
@@ -636,6 +716,7 @@ function VideoChatBootstrapContextCard({ context }) {
     </div>
   );
 }
+/* eslint-enable react/prop-types */
 
 /** 根据生成页传入的 createPayload 生成欢迎后的两条助手消息（热点卡片 + 产品卡片 + 引导提问） */
 function buildBootstrapContextAssistantMessages(createPayload) {
@@ -722,6 +803,19 @@ function getSegmentStatusMeta(viewStatus, taskStatus) {
   return { text: "未开始", tone: "draft" };
 }
 
+function getSegmentDescriptionText(segment) {
+  return (
+    (typeof segment?.description === "string" && segment.description.trim()) ||
+    (typeof segment?.description_en === "string" && segment.description_en.trim()) ||
+    ""
+  );
+}
+
+function parsePositiveDuration(raw) {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export const loader = async ({ request }) => {
   try {
     await authenticate.admin(request);
@@ -747,6 +841,7 @@ export default function VideoChatPage() {
   const [pendingReferenceAssets, setPendingReferenceAssets] = useState(() => vcInit.pendingReferenceAssets);
   const [createPayloadBySession, setCreatePayloadBySession] = useState(() => vcInit.createPayloadBySession);
   const [sending, setSending] = useState(false);
+  const [uploadingReferences, setUploadingReferences] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
@@ -765,6 +860,9 @@ export default function VideoChatPage() {
   );
   const [segmentCacheBySession, setSegmentCacheBySession] = useState(() => vcInit.segmentCacheBySession);
   const [segmentDraftBySession, setSegmentDraftBySession] = useState(() => vcInit.segmentDraftBySession);
+  const [segmentDurationDraftBySession, setSegmentDurationDraftBySession] = useState(
+    () => vcInit.segmentDurationDraftBySession,
+  );
   const [segmentSubmittingBySession, setSegmentSubmittingBySession] = useState(
     () => vcInit.segmentSubmittingBySession,
   );
@@ -864,11 +962,27 @@ export default function VideoChatPage() {
   const activeThreadView = threadViewBySession[activeSessionId] || null;
   const activeWaitingHuman = activeThreadView?.status === "waiting_human";
   const activeThreadRequesting = Boolean(threadRequestingBySession[activeSessionId]);
-  const liveSegments = Array.isArray(activeThreadView?.segments) ? activeThreadView.segments : [];
-  const activeSegments = segmentCacheBySession[activeSessionId] || liveSegments;
-  const activeSegmentDraftMap = segmentDraftBySession[activeSessionId] || {};
+  const liveSegments = useMemo(
+    () => (Array.isArray(activeThreadView?.segments) ? activeThreadView.segments : []),
+    [activeThreadView?.segments],
+  );
+  const activeSegments = useMemo(
+    () => segmentCacheBySession[activeSessionId] || liveSegments,
+    [activeSessionId, liveSegments, segmentCacheBySession],
+  );
+  const activeSegmentDraftMap = useMemo(
+    () => segmentDraftBySession[activeSessionId] || {},
+    [activeSessionId, segmentDraftBySession],
+  );
+  const activeSegmentDurationDraftMap = useMemo(
+    () => segmentDurationDraftBySession[activeSessionId] || {},
+    [activeSessionId, segmentDurationDraftBySession],
+  );
   const activeSegmentSubmittingMap = segmentSubmittingBySession[activeSessionId] || {};
-  const activeGenerationToSegmentMap = generationToSegmentBySession[activeSessionId] || {};
+  const activeGenerationToSegmentMap = useMemo(
+    () => generationToSegmentBySession[activeSessionId] || {},
+    [activeSessionId, generationToSegmentBySession],
+  );
   const activeTaskStatusMap = useMemo(() => {
     const map = {};
     const taskResults = activeThreadView?.task_results;
@@ -1014,11 +1128,16 @@ export default function VideoChatPage() {
       [activeSessionId]: Object.fromEntries(
         activeSegments.map((seg) => {
           const sid = Number(seg?.segment_id);
-          const text =
-            (typeof seg?.description === "string" && seg.description.trim()) ||
-            (typeof seg?.description_en === "string" && seg.description_en.trim()) ||
-            "";
-          return [sid, text];
+          return [sid, getSegmentDescriptionText(seg)];
+        }),
+      ),
+    }));
+    setSegmentDurationDraftBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: Object.fromEntries(
+        activeSegments.map((seg) => {
+          const sid = Number(seg?.segment_id);
+          return [sid, parsePositiveDuration(seg?.duration)];
         }),
       ),
     }));
@@ -1031,7 +1150,7 @@ export default function VideoChatPage() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, scrollToBottom]);
+  }, [messages, activeSegments.length, scrollToBottom]);
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
@@ -1123,9 +1242,6 @@ export default function VideoChatPage() {
   }, [activeSessionId, messages]);
 
   useEffect(() => {
-    /**
-     * 与首页一致：进入页面先验证登录态并读取用户信息。
-     */
     let disposed = false;
     const checkLoginStatus = async () => {
       try {
@@ -1134,35 +1250,23 @@ export default function VideoChatPage() {
           const json = await res.json().catch(() => ({}));
           if (!disposed) setCurrentUser(json?.data || json || null);
         } else if (res.status === 401 || res.status === 403) {
-          clearAuthTokens();
-          try {
-            sessionStorage.removeItem(VIDEO_CHAT_SNAPSHOT_KEY);
-          } catch {
-            // ignore
-          }
           antMessage.warning(
             res.status === 403
-              ? "账号不可用，请重新登录"
+              ? "账号不可用，请返回首页重新登录"
               : "请先登录后再使用视频生成功能"
           );
-          navigate("/app");
+          if (!disposed) setCurrentUser(null);
         } else {
           antMessage.error("暂时无法验证登录，请稍后重试");
           if (!disposed) setCurrentUser(null);
         }
       } catch (e) {
         if (e instanceof Error && e.message === "AUTH_EXPIRED") {
-          clearAuthTokens();
-          try {
-            sessionStorage.removeItem(VIDEO_CHAT_SNAPSHOT_KEY);
-          } catch {
-            // ignore
-          }
-          antMessage.warning("登录状态失效，请重新登录");
-          navigate("/app");
+          antMessage.warning("登录状态失效，请返回首页重新登录");
         } else {
           antMessage.error("网络异常，请稍后重试");
         }
+        if (!disposed) setCurrentUser(null);
       } finally {
         if (!disposed) setAuthChecking(false);
       }
@@ -1193,6 +1297,7 @@ export default function VideoChatPage() {
         generationToSegmentBySession,
         segmentCacheBySession,
         segmentDraftBySession,
+        segmentDurationDraftBySession,
       };
       sessionStorage.setItem(VIDEO_CHAT_SNAPSHOT_KEY, JSON.stringify(payload));
     } catch {
@@ -1213,6 +1318,7 @@ export default function VideoChatPage() {
     generationToSegmentBySession,
     segmentCacheBySession,
     segmentDraftBySession,
+    segmentDurationDraftBySession,
   ]);
 
   useEffect(() => {
@@ -1257,12 +1363,15 @@ export default function VideoChatPage() {
       wsOpenedRef.current = false;
 
       socket.onopen = () => {
+        // 仅处理当前仍挂在 wsRef 上的连接，避免依赖项重跑时旧 socket 晚到的 onopen 误报成功
+        if (socket !== wsRef.current) return;
         antMessage.success("实时连接已建立");
         setWsConnected(true);
         wsOpenedRef.current = true;
       };
 
       socket.onmessage = (event) => {
+        if (socket !== wsRef.current) return;
         try {
           const payload = JSON.parse(event.data);
           if (payload?.event === "ping") {
@@ -1349,6 +1458,8 @@ export default function VideoChatPage() {
       };
 
       socket.onclose = (e) => {
+        // 旧连接被 effect 清理或已被新连接替换后，onclose 可能晚到；勿与当前连接混淆
+        if (socket !== wsRef.current) return;
         setWsConnected(false);
         if (manualCloseRef.current) return;
         if (!wsOpenedRef.current) {
@@ -1408,12 +1519,12 @@ export default function VideoChatPage() {
     setDraft("");
   };
 
-  const appendMessages = (sessionId, updater) => {
+  const appendMessages = useCallback((sessionId, updater) => {
     setMessagesBySession((prev) => ({
       ...prev,
       [sessionId]: updater(prev[sessionId] || []),
     }));
-  };
+  }, []);
 
   const appendAssistantMessage = useCallback(
     (sessionId, content) => {
@@ -1445,7 +1556,7 @@ export default function VideoChatPage() {
       const lead = (view.message && String(view.message).trim()) || "请审阅剧本草稿并确认 / 修改 / 反馈";
       appendAssistantMessage(
         sessionId,
-        `需要人工决策：${lead}\n已生成 ${sorted.length} 条分镜，请在下方「分镜清单」逐条编辑或直接通过。${summary ? `\n（${summary}）` : ""}`,
+        `需要人工决策：${lead}\n已生成 ${sorted.length} 条分镜，请在「分镜清单」消息中逐条编辑或直接通过。${summary ? `\n（${summary}）` : ""}`,
       );
     },
     [appendAssistantMessage],
@@ -1477,26 +1588,55 @@ export default function VideoChatPage() {
     }));
   }, [activeSessionId]);
 
+  const handleSegmentDurationDraftChange = useCallback((segmentId, value) => {
+    setSegmentDurationDraftBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: {
+        ...(prev[activeSessionId] || {}),
+        [segmentId]: value,
+      },
+    }));
+  }, [activeSessionId]);
+
   const handleRefFilesChange = useCallback(async (e) => {
     const rawFiles = Array.from(e.target.files || []);
     e.target.value = "";
     if (!rawFiles.length) return;
 
     const bucketAdds = { images: [], audios: [], videos: [] };
-    for (const file of rawFiles) {
-      const bucket = classifyReferenceFileStrict(file);
-      if (!bucket) {
-        antMessage.warning(
-          `${file.name} 不支持：请上传图片（jpeg/png/webp/bmp/tiff/gif）、音频（wav/mp3）或参考视频（mp4/mov）`,
-        );
-        continue;
+    setUploadingReferences(true);
+    try {
+      for (const file of rawFiles) {
+        const bucket = classifyReferenceFileStrict(file);
+        if (!bucket) {
+          antMessage.warning(
+            `${file.name} 不支持：请上传图片（jpeg/png/webp/bmp/tiff/gif）、音频（wav/mp3）或参考视频（mp4/mov）`,
+          );
+          continue;
+        }
+        const result = await validateReferenceFile(file, bucket);
+        if (!result.ok) {
+          antMessage.warning(result.errors[0]);
+          continue;
+        }
+        try {
+          const uploaded = await uploadReferenceFile(file);
+          bucketAdds[bucket].push({
+            file,
+            dataUrl: null,
+            remoteUrl: uploaded.url,
+            meta: {
+              ...(result.meta || {}),
+              uploadKey: uploaded.key,
+            },
+          });
+        } catch (uploadError) {
+          const detail = uploadError instanceof Error ? uploadError.message : "上传失败";
+          antMessage.error(`「${file.name}」：${detail}`);
+        }
       }
-      const result = await validateReferenceFileAndRead(file, bucket);
-      if (!result.ok) {
-        antMessage.warning(result.errors[0]);
-        continue;
-      }
-      bucketAdds[bucket].push(result.entry);
+    } finally {
+      setUploadingReferences(false);
     }
 
     const hasAny =
@@ -1569,11 +1709,10 @@ export default function VideoChatPage() {
       }
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-        antMessage.warning("登录已过期，请重新登录");
-        navigate("/app");
+        antMessage.warning("登录已过期，请返回首页重新登录");
       }
     }
-  }, [navigate, tryAppendSegmentsChat, tryAppendThreadViewProgressChat]);
+  }, [tryAppendSegmentsChat, tryAppendThreadViewProgressChat]);
 
   const startThreadStream = useCallback(
     (sessionId, threadId) => {
@@ -1585,10 +1724,12 @@ export default function VideoChatPage() {
         void fetchThreadStateOnce(sessionId, threadId);
       };
 
-      const es = new EventSource(
-        `${VIDEO_THREAD_API_BASE}/${encodeURIComponent(threadId)}/stream`,
-        { withCredentials: true },
-      );
+      const sseBaseUrl = `${VIDEO_THREAD_API_BASE}/${encodeURIComponent(threadId)}/stream`;
+      const sseToken = getAccessToken();
+      const sseUrl = sseToken
+        ? `${sseBaseUrl}${sseBaseUrl.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(sseToken)}`
+        : sseBaseUrl;
+      const es = new EventSource(sseUrl, { withCredentials: true });
       threadStreamRef.current[sessionId] = es;
 
       const parseEventData = (event) => {
@@ -1791,8 +1932,7 @@ export default function VideoChatPage() {
         const errorText = e instanceof Error ? e.message : "创建线程失败";
         appendAssistantMessage(sessionId, `创建失败：${errorText}`);
         if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-          antMessage.warning("登录已过期，请重新登录");
-          navigate("/app");
+          antMessage.warning("登录已过期，请返回首页重新登录");
         } else {
           antMessage.error(errorText);
         }
@@ -1801,7 +1941,7 @@ export default function VideoChatPage() {
         setThreadRequestingBySession((prev) => ({ ...prev, [sessionId]: false }));
       }
     },
-    [appendAssistantMessage, fetchThreadStateOnce, navigate, startThreadStream, tryAppendThreadViewProgressChat]
+    [appendAssistantMessage, fetchThreadStateOnce, startThreadStream, tryAppendThreadViewProgressChat]
   );
 
   const resumeVideoThread = useCallback(
@@ -1837,8 +1977,7 @@ export default function VideoChatPage() {
         const errorText = e instanceof Error ? e.message : "恢复线程失败";
         appendAssistantMessage(sessionId, `恢复失败：${errorText}`);
         if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-          antMessage.warning("登录已过期，请重新登录");
-          navigate("/app");
+          antMessage.warning("登录已过期，请返回首页重新登录");
         } else {
           antMessage.error(errorText);
         }
@@ -1847,7 +1986,7 @@ export default function VideoChatPage() {
         setThreadRequestingBySession((prev) => ({ ...prev, [sessionId]: false }));
       }
     },
-    [appendAssistantMessage, fetchThreadStateOnce, navigate, startThreadStream, threadBySession, tryAppendThreadViewProgressChat]
+    [appendAssistantMessage, fetchThreadStateOnce, startThreadStream, threadBySession, tryAppendThreadViewProgressChat]
   );
 
   const handleSubmitSingleSegmentEdit = useCallback(
@@ -1859,6 +1998,11 @@ export default function VideoChatPage() {
         antMessage.warning(`分镜 #${sid} 的描述不能为空`);
         return;
       }
+      const duration = parsePositiveDuration(activeSegmentDurationDraftMap[sid] ?? segment?.duration);
+      if (duration == null) {
+        antMessage.warning(`分镜 #${sid} 的时长必须大于 0 秒`);
+        return;
+      }
       setSegmentSubmittingBySession((prev) => ({
         ...prev,
         [activeSessionId]: { ...(prev[activeSessionId] || {}), [sid]: true },
@@ -1866,7 +2010,7 @@ export default function VideoChatPage() {
       try {
         await resumeVideoThread(activeSessionId, {
           action: "edit",
-          edited_segments: [{ segment_id: sid, description: value }],
+          edited_segments: [{ segment_id: sid, description: value, duration }],
           feedback: "",
         });
       } finally {
@@ -1876,12 +2020,16 @@ export default function VideoChatPage() {
         }));
       }
     },
-    [activeSegmentDraftMap, activeSessionId, resumeVideoThread],
+    [activeSegmentDraftMap, activeSegmentDurationDraftMap, activeSessionId, resumeVideoThread],
   );
 
   const handleSend = async () => {
     const text = draft.trim();
     if (!text || sending) return;
+    if (uploadingReferences) {
+      antMessage.warning("参考文件正在上传，请稍后再发送");
+      return;
+    }
 
     const agg = validateReferenceAggregates(getUserReferenceAssets(pendingReferenceAssets));
     if (!agg.ok) {
@@ -1932,16 +2080,6 @@ export default function VideoChatPage() {
     }
   };
 
-  const handleSendFixedRequest = async () => {
-    const sessionId = activeSessionId;
-    if (sending || activeThreadRequesting) return;
-    appendMessages(sessionId, (list) => [
-      ...list.map((m) => ({ ...m, suggestions: false })),
-      { id: uid(), role: "user", content: "发送固定 create 请求（联调用）" },
-    ]);
-    await createVideoThread(sessionId, deepCloneJson(DEMO_CREATE_THREAD_PAYLOAD), "固定请求已发送");
-  };
-
   const handleResumeApprove = async () => {
     await resumeVideoThread(activeSessionId, {
       action: "approve",
@@ -1969,30 +2107,58 @@ export default function VideoChatPage() {
     if (ok) setDraft("");
   };
 
+  const handleResumeRegenerate = async () => {
+    const feedbackText = draft.trim();
+    if (!feedbackText) {
+      antMessage.warning("请先在输入框填写重新生成要求");
+      return;
+    }
+    const sessionId = activeSessionId;
+    appendMessages(sessionId, (list) => [
+      ...list.map((m) => ({ ...m, suggestions: false })),
+      { id: uid(), role: "user", content: `重新生成要求：${feedbackText}` },
+    ]);
+    const ok = await resumeVideoThread(sessionId, {
+      action: "feedback",
+      edited_segments: [],
+      feedback: feedbackText,
+    });
+    if (ok) setDraft("");
+  };
+
   const handleResumeEdit = async () => {
     const segments = activeThreadView?.segments || [];
     if (!segments.length) {
       antMessage.warning("当前没有可编辑的分镜");
       return;
     }
-    const editedSegments = segments
-      .map((seg) => {
-        const sid = Number(seg?.segment_id);
-        if (!Number.isFinite(sid)) return null;
-        const originalText =
-          (typeof seg?.description === "string" && seg.description.trim()) ||
-          (typeof seg?.description_en === "string" && seg.description_en.trim()) ||
-          "";
-        const draftText = (activeSegmentDraftMap[sid] ?? "").trim();
-        if (!draftText || draftText === originalText) return null;
-        return {
-          segment_id: sid,
-          description: draftText,
-        };
-      })
-      .filter(Boolean);
+    const editedSegments = [];
+    for (const seg of segments) {
+      const sid = Number(seg?.segment_id);
+      if (!Number.isFinite(sid)) continue;
+      const originalText = getSegmentDescriptionText(seg);
+      const draftText = (activeSegmentDraftMap[sid] ?? "").trim();
+      if (!draftText) {
+        antMessage.warning(`分镜 #${sid} 的描述不能为空`);
+        return;
+      }
+      const draftDuration = parsePositiveDuration(activeSegmentDurationDraftMap[sid] ?? seg?.duration);
+      if (draftDuration == null) {
+        antMessage.warning(`分镜 #${sid} 的时长必须大于 0 秒`);
+        return;
+      }
+      const originalDuration = parsePositiveDuration(seg?.duration);
+      const durationChanged =
+        originalDuration == null ? draftDuration != null : Math.abs(draftDuration - originalDuration) > 0.001;
+      if (!durationChanged && draftText === originalText) continue;
+      editedSegments.push({
+        segment_id: sid,
+        description: draftText,
+        duration: draftDuration,
+      });
+    }
     if (!editedSegments.length) {
-      antMessage.info("请先在分镜清单里修改至少一条分镜内容");
+      antMessage.info("请先在分镜清单里修改至少一条分镜内容或时长");
       return;
     }
     await resumeVideoThread(activeSessionId, {
@@ -2001,6 +2167,38 @@ export default function VideoChatPage() {
       feedback: "",
     });
   };
+
+  /** 页面刷新后，自动重连 snapshot 中未完成线程的 SSE 流并拉取最新状态 */
+  const snapshotReconnectedRef = useRef(false);
+  useEffect(() => {
+    if (snapshotReconnectedRef.current) return;
+    if (!vcInit.hadSnapshot) return;
+    if (authChecking) return;
+    snapshotReconnectedRef.current = true;
+
+    const entries = Object.entries(vcInit.threadBySession || {});
+    for (const [sessionId, threadId] of entries) {
+      if (!threadId) continue;
+      const view = vcInit.threadViewBySession?.[sessionId];
+      if (view?.status === "finished" || view?.status === "error") continue;
+      startThreadStream(sessionId, threadId);
+      void fetchThreadStateOnce(sessionId, threadId);
+    }
+  }, [authChecking, vcInit.hadSnapshot, vcInit.threadBySession, vcInit.threadViewBySession, startThreadStream, fetchThreadStateOnce]);
+
+  const handleReconnectActiveThread = useCallback(() => {
+    const threadId = threadBySession[activeSessionId];
+    if (!threadId) {
+      antMessage.info("当前会话没有活跃线程");
+      return;
+    }
+    antMessage.loading("正在重新连接…");
+    startThreadStream(activeSessionId, threadId);
+    void fetchThreadStateOnce(activeSessionId, threadId).then(() => {
+      antMessage.destroy();
+      antMessage.success("已重新连接并拉取最新状态");
+    });
+  }, [activeSessionId, threadBySession, startThreadStream, fetchThreadStateOnce]);
 
   useEffect(() => {
     return () => {
@@ -2040,6 +2238,90 @@ export default function VideoChatPage() {
     "要科技感、冷色调、快节奏转场",
     "结尾加品牌 slogan 与行动号召",
   ];
+
+  const activeSegmentPanel =
+    activeSegments.length > 0 ? (
+      <div className="video-chat-segment-panel">
+        <div className="video-chat-segment-panel__head">
+          <div className="video-chat-segment-panel__title">分镜清单</div>
+          <div className="video-chat-segment-panel__summary">{activeSegments.length} 条</div>
+        </div>
+        <div className="video-chat-segment-list">
+          {activeSegments
+            .slice()
+            .sort((a, b) => (Number(a?.segment_id) || 0) - (Number(b?.segment_id) || 0))
+            .map((seg) => {
+              const sid = Number(seg?.segment_id);
+              if (!Number.isFinite(sid)) return null;
+              const meta = getSegmentStatusMeta(activeThreadView?.status, activeTaskStatusMap[sid]);
+              const segmentVideoUrl = activeSegmentVideoUrlMap[sid] || "";
+              const draftValue = activeSegmentDraftMap[sid] ?? getSegmentDescriptionText(seg);
+              const durationValue = activeSegmentDurationDraftMap[sid] ?? parsePositiveDuration(seg?.duration);
+              return (
+                <div key={sid} className="video-chat-segment-item">
+                  <div className="video-chat-segment-item__top">
+                    <div className="video-chat-segment-item__title">分镜 #{sid}</div>
+                    <span className={`video-chat-segment-item__status is-${meta.tone}`}>{meta.text}</span>
+                  </div>
+                  <div className="video-chat-segment-item__meta">
+                    {seg?.mode ? <span>{seg.mode}</span> : null}
+                    <div className="video-chat-segment-duration">
+                      <span>时长</span>
+                      <InputNumber
+                        aria-label={`分镜 #${sid} 时长`}
+                        min={0.1}
+                        step={0.5}
+                        precision={1}
+                        size="small"
+                        value={durationValue}
+                        disabled={!activeWaitingHuman || activeThreadRequesting}
+                        onChange={(value) => handleSegmentDurationDraftChange(sid, value)}
+                        addonAfter="s"
+                      />
+                    </div>
+                  </div>
+                  <Input.TextArea
+                    value={draftValue}
+                    autoSize={{ minRows: 2, maxRows: 4 }}
+                    className="video-chat-segment-item__textarea"
+                    disabled={!activeWaitingHuman || activeThreadRequesting}
+                    onChange={(e) => handleSegmentDraftChange(sid, e.target.value)}
+                    placeholder="输入该分镜描述"
+                  />
+                  <div className="video-chat-segment-item__actions">
+                    <Button
+                      size="small"
+                      onClick={() => handleSubmitSingleSegmentEdit(seg)}
+                      loading={Boolean(activeSegmentSubmittingMap[sid])}
+                      disabled={!activeWaitingHuman || activeThreadRequesting}
+                    >
+                      提交此分镜修改
+                    </Button>
+                    {segmentVideoUrl && (
+                      <Button size="small" type="link" onClick={() => handleCopy(segmentVideoUrl)}>
+                        复制视频链接
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+        {activeWaitingHuman && (
+          <div className="video-chat-segment-panel__actions">
+            <Button size="small" type="primary" onClick={handleResumeApprove} loading={activeThreadRequesting}>
+              通过
+            </Button>
+            <Button size="small" onClick={handleResumeEdit} loading={activeThreadRequesting}>
+              提交修改
+            </Button>
+            <Button size="small" onClick={handleResumeRegenerate} loading={activeThreadRequesting}>
+              重新生成
+            </Button>
+          </div>
+        )}
+      </div>
+    ) : null;
 
   if (authChecking) {
     return (
@@ -2166,9 +2448,11 @@ export default function VideoChatPage() {
                 </div>
               </div>
               <div className="video-chat-main__header-buttons">
-                <Button type="primary" onClick={handleSendFixedRequest} loading={activeThreadRequesting} disabled={sending}>
-                  发送固定请求
-                </Button>
+                {activeThreadId && (
+                  <Button size="small" icon={<ReloadOutlined />} onClick={handleReconnectActiveThread} disabled={activeThreadRequesting}>
+                    重新连接
+                  </Button>
+                )}
                 <button type="button" className="video-chat-icon-btn video-chat-share" aria-label="分享">
                   <ShareAltOutlined />
                 </button>
@@ -2226,69 +2510,17 @@ export default function VideoChatPage() {
                 )}
               </div>
             ))}
-          </div>
-
-          <div className="video-chat-input-wrap">
-            {activeSegments.length > 0 && (
-              <div className="video-chat-segment-panel">
-                <div className="video-chat-segment-panel__head">
-                  <div className="video-chat-segment-panel__title">分镜清单</div>
-                  <div className="video-chat-segment-panel__summary">{activeSegments.length} 条</div>
-                </div>
-                <div className="video-chat-segment-list">
-                  {activeSegments
-                    .slice()
-                    .sort((a, b) => (Number(a?.segment_id) || 0) - (Number(b?.segment_id) || 0))
-                    .map((seg) => {
-                      const sid = Number(seg?.segment_id);
-                      if (!Number.isFinite(sid)) return null;
-                      const meta = getSegmentStatusMeta(activeThreadView?.status, activeTaskStatusMap[sid]);
-                      const segmentVideoUrl = activeSegmentVideoUrlMap[sid] || "";
-                      const draftValue =
-                        activeSegmentDraftMap[sid] ??
-                        (typeof seg?.description === "string" ? seg.description : seg?.description_en || "");
-                      const segMeta = [
-                        seg?.duration != null ? `${seg.duration}s` : null,
-                        seg?.mode ? seg.mode : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ");
-                      return (
-                        <div key={sid} className="video-chat-segment-item">
-                          <div className="video-chat-segment-item__top">
-                            <div className="video-chat-segment-item__title">分镜 #{sid}</div>
-                            <span className={`video-chat-segment-item__status is-${meta.tone}`}>{meta.text}</span>
-                          </div>
-                          {segMeta && <div className="video-chat-segment-item__meta">{segMeta}</div>}
-                          <Input.TextArea
-                            value={draftValue}
-                            autoSize={{ minRows: 2, maxRows: 4 }}
-                            className="video-chat-segment-item__textarea"
-                            disabled={!activeWaitingHuman || activeThreadRequesting}
-                            onChange={(e) => handleSegmentDraftChange(sid, e.target.value)}
-                            placeholder="输入该分镜描述"
-                          />
-                          <div className="video-chat-segment-item__actions">
-                            <Button
-                              size="small"
-                              onClick={() => handleSubmitSingleSegmentEdit(seg)}
-                              loading={Boolean(activeSegmentSubmittingMap[sid])}
-                              disabled={!activeWaitingHuman || activeThreadRequesting}
-                            >
-                              仅提交此条修改
-                            </Button>
-                            {segmentVideoUrl && (
-                              <Button size="small" type="link" onClick={() => handleCopy(segmentVideoUrl)}>
-                                复制视频链接
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+            {activeSegmentPanel && (
+              <div className="video-chat-msg video-chat-msg--assistant video-chat-msg--segments">
+                <div className="video-chat-msg__role">助手</div>
+                <div className="video-chat-msg__bubble">
+                  <div className="video-chat-msg__content">{activeSegmentPanel}</div>
                 </div>
               </div>
             )}
+          </div>
+
+          <div className="video-chat-input-wrap">
             <div className="video-chat-input-card">
               <input
                 ref={refFileInputRef}
@@ -2339,12 +2571,14 @@ export default function VideoChatPage() {
                   type="button"
                   className="video-chat-upload-tile"
                   aria-label="上传参考文件"
-                    title={
-                    pendingReferenceSummary
+                  title={
+                    uploadingReferences
+                      ? "参考文件上传中"
+                      : pendingReferenceSummary
                       ? `已添加 ${pendingReferenceSummary}，点击继续添加`
                       : "上传参考文件（见「参考资源参数限制」）"
                   }
-                  disabled={sending}
+                  disabled={sending || uploadingReferences}
                   onClick={() => refFileInputRef.current?.click()}
                 >
                   <span className="video-chat-upload-tile__surface">
@@ -2388,6 +2622,7 @@ export default function VideoChatPage() {
                       aria-label={activeWaitingHuman ? "提交反馈" : "发送"}
                       disabled={
                         sending ||
+                        uploadingReferences ||
                         (activeWaitingHuman && activeThreadRequesting) ||
                         !draft.trim()
                       }
@@ -2417,22 +2652,17 @@ export default function VideoChatPage() {
               Enter 发送 · 实时连接{wsConnected ? "已连接" : "未连接"} ·
               {activeThreadId ? ` 当前 thread: ${activeThreadId}` : " 尚未创建 thread"}
               {activeThreadView?.status ? ` · 状态: ${activeThreadView.status}` : ""}
+              {activeThreadId && activeThreadView?.status && activeThreadView.status !== "finished" && activeThreadView.status !== "error" ? (
+                <button
+                  type="button"
+                  className="video-chat-reconnect-link"
+                  onClick={handleReconnectActiveThread}
+                  style={{ marginLeft: 8, color: "var(--dash-accent, #1677ff)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontSize: "inherit" }}
+                >
+                  重新连接SSE
+                </button>
+              ) : null}
             </div>
-            {activeWaitingHuman && (
-              <div className="video-chat-human-wrap">
-                <div className="video-chat-human-actions">
-                  <Button size="small" type="primary" onClick={handleResumeApprove} loading={activeThreadRequesting}>
-                    通过并继续
-                  </Button>
-                  <Button size="small" onClick={handleResumeFeedback} loading={activeThreadRequesting}>
-                    反馈重写
-                  </Button>
-                  <Button size="small" onClick={handleResumeEdit} loading={activeThreadRequesting}>
-                    提交全部修改
-                  </Button>
-                </div>
-              </div>
-            )}
           </div>
         </main>
       </div>

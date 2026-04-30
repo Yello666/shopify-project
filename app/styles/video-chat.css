@@ -383,9 +383,11 @@
 }
 
 .video-chat-messages {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 1rem 1.25rem 0.5rem;
   display: flex;
   flex-direction: column;
@@ -397,6 +399,11 @@
   flex-direction: column;
   align-items: flex-start;
   max-width: 720px;
+}
+
+.video-chat-msg--segments {
+  width: 100%;
+  max-width: 1580px;
 }
 
 .video-chat-msg--user {
@@ -416,6 +423,8 @@
   padding: 0.75rem 1rem;
   line-height: 1.55;
   font-size: 14px;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .video-chat-msg--assistant .video-chat-msg__bubble {
@@ -639,12 +648,19 @@
 
 .video-chat-input-wrap {
   flex-shrink: 0;
-  padding: 0.65rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.65rem 1.25rem 1rem;
   background: linear-gradient(180deg, transparent, rgba(243, 245, 249, 0.95));
 }
 
 .video-chat-segment-panel {
+  display: flex;
+  flex-direction: column;
   max-width: 1580px;
+  width: 100%;
   margin: 0 auto 0.55rem;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -652,6 +668,19 @@
   box-shadow: 0 2px 14px rgba(0, 0, 0, 0.05);
   padding: 0.7rem 0.85rem;
   font-family: "Inter", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+
+.video-chat-msg--segments .video-chat-msg__bubble {
+  width: 100%;
+}
+
+.video-chat-msg--segments .video-chat-segment-panel {
+  margin: 0;
+  max-width: none;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
 }
 
 .video-chat-segment-panel__head {
@@ -674,12 +703,13 @@
 }
 
 .video-chat-segment-list {
+  overflow: visible;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: 240px;
-  overflow-y: auto;
-  padding-right: 2px;
+  padding-right: 0.25rem;
 }
 
 .video-chat-segment-item {
@@ -739,8 +769,24 @@
 }
 
 .video-chat-segment-item__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
   font-size: 12px;
   color: #7d859a;
+}
+
+.video-chat-segment-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #5f687e;
+}
+
+.video-chat-segment-duration .ant-input-number-group-wrapper {
+  width: 112px;
 }
 
 .video-chat-segment-item__textarea.ant-input {
@@ -756,6 +802,16 @@
   flex-wrap: wrap;
 }
 
+.video-chat-segment-panel__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
 .video-chat-input-card {
   position: relative;
   background: #fff;
@@ -763,8 +819,10 @@
   border: 1px solid rgba(0, 0, 0, 0.07);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
   padding: 0.65rem 0.75rem 0.5rem;
-  max-width: 900px;
+  width: 100%;
+  max-width: 1580px;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .video-chat-ref-chip-strip {
@@ -980,9 +1038,11 @@
 .video-chat-ref-rules-bar {
   display: flex;
   justify-content: flex-end;
-  max-width: 900px;
+  width: 100%;
+  max-width: 1580px;
   margin: -2px auto 0;
   padding: 0 0.75rem;
+  box-sizing: border-box;
 }
 
 .video-chat-ref-rules-btn.ant-btn.ant-btn-link {
@@ -1156,8 +1216,12 @@
     justify-content: flex-end;
   }
 
-  .video-chat-segment-list {
-    max-height: 210px;
+  .video-chat-segment-panel__actions {
+    justify-content: stretch;
+  }
+
+  .video-chat-segment-panel__actions .ant-btn {
+    flex: 1;
   }
 }
 

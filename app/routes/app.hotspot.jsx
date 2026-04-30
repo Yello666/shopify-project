@@ -449,8 +449,8 @@ export default function Hotspot() {
       }
     } catch (err) {
       if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
-        message.warning("请先登录");
-        navigate("/app");
+        message.warning("登录已过期，请重新登录");
+        setError("登录已过期，请返回首页重新登录");
         return;
       }
       setError(err.message || "加载失败");
@@ -458,7 +458,7 @@ export default function Hotspot() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [navigate]);
+  }, []);
 
   const loadRecommendScheduleState = useCallback(async () => {
     setScheduleLoading(true);
@@ -482,15 +482,13 @@ export default function Hotspot() {
       });
     } catch (err) {
       if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
-        message.warning("请先登录");
-        navigate("/app");
         return;
       }
       message.error(err?.message || "读取定时推荐配置失败");
     } finally {
       setScheduleLoading(false);
     }
-  }, [navigate]);
+  }, []);
 
   useEffect(() => {
     loadHotspotPage(1, false);
@@ -587,8 +585,7 @@ export default function Hotspot() {
       );
     } catch (err) {
       if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
-        message.warning("请先登录");
-        navigate("/app");
+        message.warning("登录已过期，请返回首页重新登录");
         return;
       }
       message.error(err?.message || "推荐失败");
@@ -648,8 +645,7 @@ export default function Hotspot() {
       message.success(saved.is_enabled ? "已开启定时推荐任务" : "已关闭定时推荐任务");
     } catch (err) {
       if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
-        message.warning("请先登录");
-        navigate("/app");
+        message.warning("登录已过期，请返回首页重新登录");
         return;
       }
       message.error(err?.message || "保存定时推荐配置失败");

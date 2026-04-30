@@ -72,8 +72,8 @@ export default function ProductsPage() {
       setProducts(parseProductListResponse(json));
     } catch (e) {
       if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
-        message.warning("登录已过期，请重新登录");
-        navigate("/app");
+        message.warning("登录已过期，请返回首页重新登录");
+        setError("登录已过期，请返回首页重新登录");
       } else {
         const detail = e instanceof Error ? e.message : "网络错误";
         setError(detail);
