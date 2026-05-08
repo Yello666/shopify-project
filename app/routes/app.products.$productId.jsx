@@ -1,13 +1,35 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Button, Spin, Tag, Descriptions } from "antd";
+import {
+  Button,
+  Spin,
+  Tag,
+  Descriptions,
+  Modal,
+  Form,
+  Input,
+  InputNumber,
+  Select,
+  Popconfirm,
+  message,
+  Alert,
+} from "antd";
 import { authFetch } from "../utils/auth-api";
+import { ProductImageUrlField } from "../components/ProductImageUrlField";
 
-const MERCHANT_API_BASE = "/api/v1/merchant";
+const MERCHANT_INFO_URL = "/api/v1/merchant/info";
+const PRODUCTS_API_BASE = "/api/v1/products";
+const LOCAL_PRODUCTS_BASE = "/api/v1/local-products";
 
-function normalizeProduct(raw) {
+const STATUS_OPTIONS = [
+  { value: "active", label: "上架 active" },
+  { value: "draft", label: "草稿 draft" },
+  { value: "archived", label: "归档 archived" },
+];
+
+function normalizeShopifyProduct(raw) {
   if (!raw || typeof raw !== "object") return raw;
 
   const id = raw.id ?? raw.product_id;
@@ -30,6 +52,7 @@ function normalizeProduct(raw) {
     id,
     title,
     body_html: bodyHtml,
+    _plainDescription: false,
     variants,
     images,
     image: raw.image ?? (imageSrc ? { src: imageSrc } : undefined),
@@ -37,6 +60,40 @@ function normalizeProduct(raw) {
     product_type: raw.product_type ?? "",
     status: raw.status ?? "",
     tags: raw.tags ?? "",
+  };
+}
+
+/** 本地商品 API 转详情页统一结构 */
+function normalizeLocalProduct(raw) {
+  if (!raw || typeof raw !== "object") return raw;
+  const id = raw.id;
+  const title = raw.title ?? "";
+  const desc = raw.description ?? "";
+  const imageSrc = raw.image_url ?? "";
+  return {
+    ...raw,
+    id,
+    title,
+    body_html: desc,
+    _plainDescription: true,
+    vendor: "—",
+    product_type: raw.product_type ?? "",
+    status: raw.status ?? "",
+    tags: "",
+    variants: [
+      {
+        id: `${id}-default`,
+        title: "默认规格",
+        price: raw.price != null ? String(raw.price) : "",
+        compare_at_price:
+          raw.compare_at_price != null ? String(raw.compare_at_price) : undefined,
+        inventory_quantity: raw.inventory ?? 0,
+      },
+    ],
+    images: imageSrc ? [{ id: `${id}-img`, src: imageSrc }] : [],
+    image: imageSrc ? { src: imageSrc } : undefined,
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
   };
 }
 
@@ -55,32 +112,121 @@ export default function ProductDetail() {
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [accountType, setAccountType] = useState(null);
 
-  useEffect(() => {
-    const pid = Number(productId);
-    if (!pid || isNaN(pid)) {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorSubmitting, setEditorSubmitting] = useState(false);
+  const [form] = Form.useForm();
+
+  const isStandalone = accountType === "standalone";
+  const pid = Number(productId);
+
+  const loadDetail = useCallback(async () => {
+    if (!pid || Number.isNaN(pid)) {
       setError("无效的商品ID");
       setLoading(false);
       return;
     }
-    authFetch(`${MERCHANT_API_BASE.replace("/merchant", "/products")}/${pid}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`获取失败: ${res.status}`);
-        return res.json();
-      })
-      .then((json) => {
-        setProduct(normalizeProduct(json?.data || json));
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
-          setError("登录已过期，请重新登录");
-        } else {
-          setError(err.message);
-        }
-        setLoading(false);
+    setLoading(true);
+    setError(null);
+    try {
+      const mRes = await authFetch(MERCHANT_INFO_URL);
+      const mJson = await mRes.json().catch(() => ({}));
+      const acc = (mJson?.data ?? mJson)?.account_type || "shopify";
+      setAccountType(acc);
+
+      const isSt = acc === "standalone";
+      const url = isSt ? `${LOCAL_PRODUCTS_BASE}/${pid}` : `${PRODUCTS_API_BASE}/${pid}`;
+      const pRes = await authFetch(url);
+      const pJson = await pRes.json().catch(() => ({}));
+      if (!pRes.ok) {
+        throw new Error(pJson?.data?.message || pJson?.message || pJson?.detail || `获取失败: ${pRes.status}`);
+      }
+      const raw = pJson?.data ?? pJson;
+      setProduct(isSt ? normalizeLocalProduct(raw) : normalizeShopifyProduct(raw));
+    } catch (err) {
+      if (err?.message === "AUTH_REQUIRED" || err?.message === "AUTH_EXPIRED") {
+        setError("登录已过期，请重新登录");
+      } else {
+        setError(err.message || "加载失败");
+      }
+      setProduct(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [pid]);
+
+  useEffect(() => {
+    loadDetail();
+  }, [loadDetail]);
+
+  const openEdit = () => {
+    if (!product || !isStandalone) return;
+    form.setFieldsValue({
+      title: product.title,
+      description: product._plainDescription ? product.body_html : "",
+      price: product.variants?.[0]?.price != null ? Number(product.variants[0].price) : 0,
+      compare_at_price:
+        product.variants?.[0]?.compare_at_price != null
+          ? Number(product.variants[0].compare_at_price)
+          : undefined,
+      image_url: product.images?.[0]?.src ?? "",
+      inventory: product.variants?.[0]?.inventory_quantity ?? 0,
+      product_type: product.product_type ?? "",
+      status: product.status || "active",
+    });
+    setEditorOpen(true);
+  };
+
+  const submitEdit = async () => {
+    try {
+      const values = await form.validateFields();
+      setEditorSubmitting(true);
+      const payload = {
+        title: values.title?.trim(),
+        description: values.description || null,
+        price: values.price ?? 0,
+        compare_at_price: values.compare_at_price ?? null,
+        image_url: values.image_url?.trim() || null,
+        inventory: values.inventory ?? 0,
+        product_type: values.product_type?.trim() || null,
+        status: values.status || "active",
+      };
+      const res = await authFetch(`${LOCAL_PRODUCTS_BASE}/${pid}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
-  }, [productId]);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        message.error(json?.detail || json?.message || "保存失败");
+        return;
+      }
+      message.success("已更新");
+      setEditorOpen(false);
+      loadDetail();
+    } catch (e) {
+      if (e?.errorFields) return;
+      message.error(e instanceof Error ? e.message : "保存失败");
+    } finally {
+      setEditorSubmitting(false);
+    }
+  };
+
+  const deleteProduct = async () => {
+    try {
+      const res = await authFetch(`${LOCAL_PRODUCTS_BASE}/${pid}`, { method: "DELETE" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        message.error(json?.detail || json?.message || "删除失败");
+        return;
+      }
+      message.success("已删除");
+      navigate("/app/products");
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "网络错误");
+    }
+  };
 
   if (loading) {
     return (
@@ -127,6 +273,41 @@ export default function ProductDetail() {
         <span>返回</span>
       </button>
       <s-page heading={`商品详情 - ${product.title || ""}`}>
+        {accountType && !isStandalone ? (
+          <s-section>
+            <div className="dash-shell dash-section-inner" style={{ marginBottom: 12 }}>
+              <Alert
+                type="warning"
+                showIcon
+                message="当前为 Shopify 店铺商品，仅支持查看，修改请在 Shopify 后台进行。"
+              />
+            </div>
+          </s-section>
+        ) : null}
+        {isStandalone ? (
+          <s-section>
+            <div className="dash-shell dash-section-inner" style={{ marginBottom: 12 }}>
+              <Alert
+                type="info"
+                showIcon
+                message="平台本地商品，可编辑或删除。"
+                action={
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Button size="small" onClick={openEdit}>
+                      编辑
+                    </Button>
+                    <Popconfirm title="确定删除该商品？" onConfirm={deleteProduct}>
+                      <Button size="small" danger>
+                        删除
+                      </Button>
+                    </Popconfirm>
+                  </div>
+                }
+              />
+            </div>
+          </s-section>
+        ) : null}
+
         <s-section heading="基本信息">
           <div className="dash-shell dash-section-inner">
             <Descriptions column={2} bordered size="small">
@@ -151,7 +332,6 @@ export default function ProductDetail() {
           </div>
         </s-section>
 
-        {/* 商品图片 */}
         {mainImage && (
           <s-section heading="商品图片">
             <div className="dash-shell dash-section-inner">
@@ -178,16 +358,18 @@ export default function ProductDetail() {
           </s-section>
         )}
 
-        {/* 商品描述 */}
         {product.body_html && (
           <s-section heading="商品描述">
             <div className="dash-shell dash-section-inner">
-              <div dangerouslySetInnerHTML={{ __html: product.body_html }} style={{ lineHeight: 1.8 }} />
+              {product._plainDescription ? (
+                <div style={{ lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{product.body_html}</div>
+              ) : (
+                <div dangerouslySetInnerHTML={{ __html: product.body_html }} style={{ lineHeight: 1.8 }} />
+              )}
             </div>
           </s-section>
         )}
 
-        {/* 规格变体 */}
         {variantList.length > 0 && (
           <s-section heading={`规格变体（${variantList.length} 个）`}>
             <div className="dash-shell dash-section-inner">
@@ -227,7 +409,6 @@ export default function ProductDetail() {
           </s-section>
         )}
 
-        {/* 规格选项 */}
         {optionList.length > 0 && (
           <s-section heading="规格选项">
             <div className="dash-shell dash-section-inner">
@@ -245,6 +426,41 @@ export default function ProductDetail() {
           </s-section>
         )}
       </s-page>
+
+      <Modal
+        title="编辑商品"
+        open={editorOpen}
+        onCancel={() => setEditorOpen(false)}
+        onOk={submitEdit}
+        confirmLoading={editorSubmitting}
+        destroyOnHidden
+        width={560}
+      >
+        <Form form={form} layout="vertical" style={{ marginTop: 8 }}>
+          <Form.Item name="title" label="标题" rules={[{ required: true, message: "请填写标题" }]}>
+            <Input maxLength={512} showCount />
+          </Form.Item>
+          <Form.Item name="description" label="描述">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item name="price" label="售价" rules={[{ required: true }]}>
+            <InputNumber min={0} step={0.01} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="compare_at_price" label="划线价（可选）">
+            <InputNumber min={0} step={0.01} style={{ width: "100%" }} />
+          </Form.Item>
+          <ProductImageUrlField />
+          <Form.Item name="inventory" label="库存">
+            <InputNumber min={0} step={1} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="product_type" label="商品类型">
+            <Input />
+          </Form.Item>
+          <Form.Item name="status" label="状态" rules={[{ required: true }]}>
+            <Select options={STATUS_OPTIONS} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </>
   );
 }

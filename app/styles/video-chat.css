@@ -155,48 +155,17 @@
   gap: 6px;
 }
 
-.video-chat-task-list,
+.video-chat-history-list__loading {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 10px;
+  color: #a8aebf;
+}
+
 .video-chat-history-list {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.video-chat-task-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0.45rem 0.5rem;
-  border-radius: 8px;
-  font-size: 12px;
-  color: #5c6378;
-  cursor: default;
-}
-
-.video-chat-task-list li.is-active {
-  background: rgba(77, 105, 250, 0.1);
-  color: var(--dash-blue);
-}
-
-.video-chat-task-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 3px;
-  background: #c5cad8;
-  flex-shrink: 0;
-}
-
-.video-chat-task-list li.is-active .video-chat-task-dot {
-  background: var(--dash-blue);
-}
-
-.video-chat-task-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.video-chat-history-list {
   overflow-y: auto;
   flex: 1;
 }
@@ -441,6 +410,56 @@
 .video-chat-msg__content {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* 历史记录：assistant_draft → 元信息 + 分镜列表项 */
+.video-chat-history-draft {
+  white-space: normal;
+  word-break: break-word;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.video-chat-history-draft__title {
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+
+.video-chat-history-draft__meta {
+  margin: 0 0 0.2rem;
+}
+
+.video-chat-history-draft__list {
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: decimal;
+  list-style-position: inside;
+}
+
+.video-chat-history-draft__item {
+  margin: 0 0 0.5rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(77, 105, 250, 0.18);
+  border-radius: 10px;
+  background: rgba(248, 250, 255, 0.95);
+  box-sizing: border-box;
+}
+
+.video-chat-history-draft__item:last-child {
+  margin-bottom: 0;
+}
+
+.video-chat-history-draft__item-text {
+  display: block;
+}
+
+.video-chat-history-draft__dur {
+  white-space: nowrap;
+}
+
+.video-chat-history-draft__empty {
+  margin: 0.35rem 0 0;
+  color: var(--dash-muted, #6b7280);
 }
 
 .video-chat-msg__content .video-chat-bootstrap {
@@ -785,8 +804,21 @@
   color: #5f687e;
 }
 
-.video-chat-segment-duration .ant-input-number-group-wrapper {
-  width: 112px;
+.video-chat-segment-duration__value {
+  min-width: 6.5rem;
+  font-size: 12px;
+  color: #5f687e;
+}
+
+.video-chat-segment-duration__hint {
+  color: #8b92a8;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.video-chat-segment-duration__trigger {
+  padding: 0 4px;
+  color: #5f687e;
 }
 
 .video-chat-segment-item__textarea.ant-input {

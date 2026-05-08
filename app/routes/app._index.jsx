@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Button, Modal, Input, message, Spin, Empty } from "antd";
+import { Button, Modal, Input, message, Spin, Empty, Segmented } from "antd";
 import {
   authFetch,
   clearAuthTokens,
@@ -49,6 +49,8 @@ export default function Index() {
     password: "",
     shopify_domain: "",
   });
+  /** 注册方式：shopify = OAuth 授权；local = 平台自注册（无店铺域名） */
+  const [registerMode, setRegisterMode] = useState("shopify");
 
   /** 当前登录用户信息 */
   const [currentUser, setCurrentUser] = useState(null);
@@ -241,7 +243,7 @@ export default function Index() {
     }
   };
 
-  const submitRegister = async () => {
+  const submitRegisterShopify = async () => {
     const { name, email, password, shopify_domain } = registerForm;
     if (!name.trim() || !email.trim() || !password || !shopify_domain.trim()) {
       message.warning("请填写名称、邮箱、密码与 Shopify 店铺域名");
@@ -288,8 +290,7 @@ export default function Index() {
           }, 2000);
         }
         setAuthModalOpen(false);
-        setAuthView("login"); // 切换到登录视图
-        // 回填登录表单
+        setAuthView("login");
         setLoginForm({ username: name.trim(), password: password });
         setRegisterForm({
           name: "",
@@ -306,6 +307,78 @@ export default function Index() {
       setAuthSubmitting(false);
     }
   };
+
+  /** 平台自注册：无 Shopify 域名，成功后直接下发 token */
+  const submitRegisterLocal = async () => {
+    const { name, email, password } = registerForm;
+    if (!name.trim() || !email.trim() || !password) {
+      message.warning("请填写商户名称、邮箱与密码");
+      return;
+    }
+    setAuthSubmitting(true);
+    try {
+      const res = await fetch(`${AUTH_API_BASE}/localRegister`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          password,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const detail =
+          json?.data?.message ||
+          json?.message ||
+          json?.detail ||
+          "注册失败";
+        message.error(typeof detail === "string" ? detail : "注册失败");
+        return;
+      }
+      if (json.code !== 0 && json.code !== undefined && json.code !== 200) {
+        message.error(json.message || json.data?.message || "注册失败");
+        return;
+      }
+
+      const { accessToken, refreshToken } = parseTokenResponse(json);
+      if (accessToken || refreshToken) {
+        saveAuthTokens({ accessToken, refreshToken });
+      }
+
+      try {
+        const infoRes = await authFetch(`${MERCHANT_API_BASE}/info`);
+        if (infoRes.ok) {
+          const infoJson = await infoRes.json().catch(() => ({}));
+          setCurrentUser(infoJson?.data || infoJson);
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message === "AUTH_EXPIRED") {
+          clearAuthTokens();
+        }
+      }
+
+      message.success("注册成功，已自动登录");
+      setAuthModalOpen(false);
+      setAuthView("login");
+      setRegisterForm({
+        name: "",
+        email: "",
+        password: "",
+        shopify_domain: "",
+      });
+      setLoginForm({ username: name.trim(), password: "" });
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "网络错误");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const submitRegister = () =>
+    registerMode === "local" ? submitRegisterLocal() : submitRegisterShopify();
 
   return (
     <>
@@ -407,7 +480,7 @@ export default function Index() {
         </div>
       </div>
 
-      {/* 登录 / 注册（后端：POST /api/v1/auth/login 为 OAuth2 表单；register 为 MerchantCreate JSON） */}
+      {/* 登录 / 注册：login 表单；register → Shopify OAuth；localRegister → 平台自注册 JSON） */}
       <Modal
         open={authModalOpen}
         onCancel={() => {
@@ -478,6 +551,17 @@ export default function Index() {
           </div>
         ) : (
           <div className="ant-form-stack">
+            <div className="ant-form-row" style={{ marginBottom: 4 }}>
+              <Segmented
+                block
+                value={registerMode}
+                onChange={(v) => setRegisterMode(v)}
+                options={[
+                  { label: "Shopify 店铺注册", value: "shopify" },
+                  { label: "平台注册（无店铺）", value: "local" },
+                ]}
+              />
+            </div>
             <div className="ant-form-row">
               <label className="ant-form-label" htmlFor="reg-name">
                 商户名称 <span className="ant-form-required">*</span>
@@ -520,28 +604,36 @@ export default function Index() {
                 placeholder="设置登录密码"
               />
             </div>
-            <div className="ant-form-row">
-              <label className="ant-form-label" htmlFor="reg-shop">
-                Shopify 店铺域名 <span className="ant-form-required">*</span>
-              </label>
-              <Input
-                id="reg-shop"
-                value={registerForm.shopify_domain}
-                onChange={(e) =>
-                  setRegisterForm((f) => ({
-                    ...f,
-                    shopify_domain: e.target.value,
-                  }))
-                }
-                placeholder="如 your-store.myshopify.com"
-              />
-            </div>
-            <div style={{ marginTop: "12px", padding: "8px", background: "#fff7e6", borderRadius: "4px", fontSize: "12px", color: "#ad6800" }}>
-              <strong>注册流程说明：</strong><br/>
-              1. 填写信息后点击「注册并授权」<br/>
-              2. 在弹出的 Shopify 页面完成授权<br/>
-              3. 授权完成后返回此页面，使用「商户名称」和密码登录
-            </div>
+            {registerMode === "shopify" ? (
+              <>
+                <div className="ant-form-row">
+                  <label className="ant-form-label" htmlFor="reg-shop">
+                    Shopify 店铺域名 <span className="ant-form-required">*</span>
+                  </label>
+                  <Input
+                    id="reg-shop"
+                    value={registerForm.shopify_domain}
+                    onChange={(e) =>
+                      setRegisterForm((f) => ({
+                        ...f,
+                        shopify_domain: e.target.value,
+                      }))
+                    }
+                    placeholder="如 your-store.myshopify.com"
+                  />
+                </div>
+                <div style={{ marginTop: "12px", padding: "8px", background: "#fff7e6", borderRadius: "4px", fontSize: "12px", color: "#ad6800" }}>
+                  <strong>注册流程说明：</strong><br/>
+                  1. 填写信息后点击「注册并获取授权链接」<br/>
+                  2. 在弹出的 Shopify 页面完成授权<br/>
+                  3. 授权完成后返回此页面，使用「商户名称」和密码登录
+                </div>
+              </>
+            ) : (
+              <div style={{ marginTop: "12px", padding: "8px", background: "#f0f5ff", borderRadius: "4px", fontSize: "12px", color: "#2f54eb" }}>
+                <strong>说明：</strong>无需绑定 Shopify，注册成功后将直接登录；商品等功能使用平台内维护的数据。
+              </div>
+            )}
             <div
               style={{
                 display: "flex",
@@ -555,7 +647,7 @@ export default function Index() {
                 loading={authSubmitting}
                 onClick={submitRegister}
               >
-                注册并获取授权链接
+                {registerMode === "local" ? "注册并登录" : "注册并获取授权链接"}
               </Button>
               <Button
                 type="link"

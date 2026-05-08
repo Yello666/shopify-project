@@ -13,19 +13,19 @@ import {
   validateVideoFile,
   REFERENCE_ASSETS_RULES_SECTIONS,
 } from "../utils/video-reference-validation";
-import { Button, Input, InputNumber, message as antMessage, Modal, Select, Switch, Tooltip } from "antd";
+import { Button, Dropdown, Input, message as antMessage, Modal, Select, Switch, Tooltip } from "antd";
 import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   PlusOutlined,
   ArrowUpOutlined,
+  DownOutlined,
   SettingOutlined,
   ShareAltOutlined,
   CopyOutlined,
   ReloadOutlined,
   LikeOutlined,
   DislikeOutlined,
-  CheckSquareOutlined,
   HistoryOutlined,
   GiftOutlined,
   InfoCircleOutlined,
@@ -36,11 +36,6 @@ const EMPTY_MESSAGES = [];
 
 const WELCOME_TEXT =
   "你好～我是你的视频生成助手，请你把你对于视频的想法输入对话框（如视频剧情、视频氛围），我会帮你生成视频～";
-
-const MOCK_TASKS = [
-  { id: "t1", label: "夏季新品推广 · 生成中", active: true },
-  { id: "t2", label: "热点借势 · 排队中", active: false },
-];
 
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -202,7 +197,7 @@ const BACKEND_GENERATION_MODE_MULTIMODAL = "multimodal_reference";
 const VIDEO_CHAT_BOOTSTRAP_KEY = "video_chat_bootstrap_v1";
 /** 刷新后恢复聊天区、线程与参数（同 tab sessionStorage）。 */
 const VIDEO_CHAT_SNAPSHOT_KEY = "video_chat_snapshot_v1";
-const VIDEO_CHAT_SNAPSHOT_VERSION = 1;
+const VIDEO_CHAT_SNAPSHOT_VERSION = 2;
 
 /**
  * WebSocket 基础地址（无 query），与后端 `/api/v1/video-tasks/stream` 对应。
@@ -467,7 +462,7 @@ function readVideoChatSnapshotPayload() {
     const raw = sessionStorage.getItem(VIDEO_CHAT_SNAPSHOT_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data || data.v !== VIDEO_CHAT_SNAPSHOT_VERSION) return null;
+    if (!data || (Number(data.v) !== 1 && Number(data.v) !== 2)) return null;
     if (!Array.isArray(data.sessions) || data.sessions.length === 0) return null;
     if (typeof data.activeSessionId !== "string") return null;
     return data;
@@ -477,37 +472,20 @@ function readVideoChatSnapshotPayload() {
 }
 
 function buildDemoInitialState() {
+  const id = `s-${uid()}`;
   const t = Date.now();
+  const defaultVp = cloneVideoParams(DEFAULT_VIDEO_PARAMS);
   return {
-    sessions: [
-      { id: "s1", title: "视频生成助手", updatedAt: t },
-      { id: "s2", title: "新品预告脚本", updatedAt: t - 1000 },
-      { id: "s3", title: "社媒竖版短片", updatedAt: t - 2000 },
-    ],
-    activeSessionId: "s1",
+    sessions: [{ id, title: "新对话", updatedAt: t }],
+    activeSessionId: id,
     messagesBySession: {
-      s1: [{ id: "m0", role: "assistant", content: WELCOME_TEXT, suggestions: true }],
-      s2: [
-        {
-          id: "m-s2-1",
-          role: "assistant",
-          content: "（演示）这是「新品预告脚本」里的消息区，与左侧其他条目内容不同。",
-        },
-        { id: "m-s2-2", role: "user", content: "突出礼盒开箱镜头" },
-      ],
-      s3: [
-        {
-          id: "m-s3-1",
-          role: "assistant",
-          content: "（演示）这是「社媒竖版短片」里的消息区，用来预览切换效果。",
-        },
-      ],
+      [id]: [{ id: uid(), role: "assistant", content: WELCOME_TEXT, suggestions: true }],
     },
     draft: "",
-    pendingReferenceAssets: { ...EMPTY_PENDING_REFERENCE_ASSETS },
+    pendingReferenceAssetsBySession: { [id]: { ...EMPTY_PENDING_REFERENCE_ASSETS } },
     createPayloadBySession: {},
-    videoParams: cloneVideoParams(DEFAULT_VIDEO_PARAMS),
-    paramDraft: cloneVideoParams(DEFAULT_VIDEO_PARAMS),
+    videoParamsBySession: { [id]: cloneVideoParams(defaultVp) },
+    paramDraftBySession: { [id]: cloneVideoParams(defaultVp) },
     threadBySession: {},
     threadViewBySession: {},
     threadRequestingBySession: {},
@@ -521,23 +499,82 @@ function buildDemoInitialState() {
 }
 
 function hydrateFromSnapshotPayload(data) {
+  const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+  const activeSessionId =
+    typeof data.activeSessionId === "string" && data.activeSessionId
+      ? data.activeSessionId
+      : sessions[0]?.id || "";
   const paramSrc =
     data.paramDraft && typeof data.paramDraft === "object" ? data.paramDraft : data.videoParams;
+
+  let pendingReferenceAssetsBySession = {};
+  if (data.pendingReferenceAssetsBySession && typeof data.pendingReferenceAssetsBySession === "object") {
+    for (const [k, v] of Object.entries(data.pendingReferenceAssetsBySession)) {
+      pendingReferenceAssetsBySession[k] = deserializePendingReferenceAssets(v);
+    }
+  } else if (data.pendingReferenceAssets != null) {
+    pendingReferenceAssetsBySession[activeSessionId] = deserializePendingReferenceAssets(
+      data.pendingReferenceAssets,
+    );
+  }
+
+  let videoParamsBySession = {};
+  if (data.videoParamsBySession && typeof data.videoParamsBySession === "object") {
+    for (const [k, v] of Object.entries(data.videoParamsBySession)) {
+      videoParamsBySession[k] = cloneVideoParams({ ...DEFAULT_VIDEO_PARAMS, ...(v || {}) });
+    }
+  } else {
+    videoParamsBySession[activeSessionId] = cloneVideoParams({
+      ...DEFAULT_VIDEO_PARAMS,
+      ...(data.videoParams || {}),
+    });
+  }
+
+  let paramDraftBySession = {};
+  if (data.paramDraftBySession && typeof data.paramDraftBySession === "object") {
+    for (const [k, v] of Object.entries(data.paramDraftBySession)) {
+      paramDraftBySession[k] = cloneVideoParams({ ...DEFAULT_VIDEO_PARAMS, ...(v || {}) });
+    }
+  } else {
+    paramDraftBySession[activeSessionId] = cloneVideoParams({
+      ...DEFAULT_VIDEO_PARAMS,
+      ...(paramSrc || {}),
+    });
+  }
+
+  const messagesBySession =
+    data.messagesBySession && typeof data.messagesBySession === "object" ? data.messagesBySession : {};
+  const allSessionIds = new Set([
+    ...sessions.map((s) => s?.id).filter((id) => typeof id === "string"),
+    ...Object.keys(messagesBySession),
+    ...Object.keys(pendingReferenceAssetsBySession),
+    ...Object.keys(videoParamsBySession),
+    ...Object.keys(paramDraftBySession),
+  ]);
+  for (const id of allSessionIds) {
+    if (!pendingReferenceAssetsBySession[id]) {
+      pendingReferenceAssetsBySession[id] = { ...EMPTY_PENDING_REFERENCE_ASSETS };
+    }
+    if (!videoParamsBySession[id]) {
+      videoParamsBySession[id] = cloneVideoParams(DEFAULT_VIDEO_PARAMS);
+    }
+    if (!paramDraftBySession[id]) {
+      paramDraftBySession[id] = cloneVideoParams(videoParamsBySession[id]);
+    }
+  }
+
   return {
-    sessions: data.sessions,
-    activeSessionId: data.activeSessionId,
-    messagesBySession:
-      data.messagesBySession && typeof data.messagesBySession === "object"
-        ? data.messagesBySession
-        : {},
+    sessions,
+    activeSessionId,
+    messagesBySession,
     draft: typeof data.draft === "string" ? data.draft : "",
-    pendingReferenceAssets: deserializePendingReferenceAssets(data.pendingReferenceAssets),
+    pendingReferenceAssetsBySession,
     createPayloadBySession:
       data.createPayloadBySession && typeof data.createPayloadBySession === "object"
         ? data.createPayloadBySession
         : {},
-    videoParams: cloneVideoParams({ ...DEFAULT_VIDEO_PARAMS, ...(data.videoParams || {}) }),
-    paramDraft: cloneVideoParams({ ...DEFAULT_VIDEO_PARAMS, ...(paramSrc || {}) }),
+    videoParamsBySession,
+    paramDraftBySession,
     threadBySession:
       data.threadBySession && typeof data.threadBySession === "object" ? data.threadBySession : {},
     threadViewBySession:
@@ -811,9 +848,205 @@ function getSegmentDescriptionText(segment) {
   );
 }
 
-function parsePositiveDuration(raw) {
+/** 分镜时长：-1 为模型自主选择；可选 4–15s */
+const SEGMENT_DURATION_AUTONOMOUS = -1;
+const SEGMENT_DURATION_SECONDS = Array.from({ length: 12 }, (_, i) => i + 4);
+
+function coerceSegmentDurationFromBackend(raw) {
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  if (!Number.isFinite(n)) return SEGMENT_DURATION_AUTONOMOUS;
+  if (n === -1) return SEGMENT_DURATION_AUTONOMOUS;
+  if (n >= 4 && n <= 15) return n;
+  if (n > 0) return Math.min(15, Math.max(4, Math.round(n)));
+  return SEGMENT_DURATION_AUTONOMOUS;
+}
+
+function isAllowedSegmentDuration(d) {
+  if (d === SEGMENT_DURATION_AUTONOMOUS) return true;
+  const n = Number(d);
+  return Number.isFinite(n) && n >= 4 && n <= 15;
+}
+
+function resolveSegmentDurationDraft(sid, draftMap, segment) {
+  const raw = draftMap[sid];
+  if (raw !== undefined && raw !== null) return raw;
+  return coerceSegmentDurationFromBackend(segment?.duration);
+}
+
+/** 侧栏「历史对话」中与 GET /video-thread/list 对应的会话 id 前缀 */
+const SERVER_THREAD_SESSION_PREFIX = "srv-";
+
+function threadIdFromServerSessionId(sessionId) {
+  if (typeof sessionId !== "string" || !sessionId.startsWith(SERVER_THREAD_SESSION_PREFIX)) {
+    return "";
+  }
+  return sessionId.slice(SERVER_THREAD_SESSION_PREFIX.length);
+}
+
+/** 与聊天区分镜气泡去重逻辑一致（见 tryAppendSegmentsChat） */
+function buildSegmentDraftFingerprint(threadId, segments) {
+  if (!threadId || !Array.isArray(segments) || segments.length === 0) return "";
+  const sorted = [...segments].sort((a, b) => (Number(a?.segment_id) || 0) - (Number(b?.segment_id) || 0));
+  return `${threadId}|${sorted
+    .map(
+      (s) =>
+        `${s?.segment_id}:${s?.duration ?? ""}:${s?.mode ?? ""}:${String(s?.description || s?.description_en || "").slice(0, 48)}`,
+    )
+    .join("¦")}`;
+}
+
+/** GET /video-thread/{id}/history → 聊天消息列表 + 最后一版分镜指纹（用于与 /state、SSE 去重） */
+function buildMessagesFromThreadHistoryPayload(threadId, payload) {
+  const turns = Array.isArray(payload?.turns) ? payload.turns : [];
+  const messages = [];
+  let lastSegmentDraftFingerprint = "";
+
+  for (const turn of turns) {
+    const kind = turn?.kind;
+    if (kind === "user_input") {
+      const text = (turn.user_input && String(turn.user_input).trim()) || "（无文字）";
+      messages.push({ id: uid(), role: "user", content: text });
+    } else if (kind === "assistant_draft") {
+      const segs = Array.isArray(turn.segments) ? turn.segments : [];
+      const fp = buildSegmentDraftFingerprint(threadId, segs);
+      if (fp) lastSegmentDraftFingerprint = fp;
+
+      const sorted = [...segs].sort((a, b) => (Number(a?.segment_id) || 0) - (Number(b?.segment_id) || 0));
+      const draftListItems = sorted.map((s) => {
+        const sid = Number(s?.segment_id);
+        const description = getSegmentDescriptionText(s);
+        const durRaw = s?.duration;
+        const durationLabel = durRaw != null && durRaw !== "" ? `${durRaw}s` : "";
+        return {
+          segmentId: Number.isFinite(sid) ? sid : null,
+          description,
+          durationLabel,
+        };
+      });
+
+      const metaParts = [];
+      if (turn.total_duration != null) metaParts.push(`总时长约 ${turn.total_duration}s`);
+      if (turn.execution_strategy) metaParts.push(String(turn.execution_strategy));
+      const durationSummary = metaParts.length ? metaParts.join(" · ") : null;
+
+      const linesPlain = ["【分镜草稿】"];
+      if (turn.revision_count != null) linesPlain.push(`修订轮次：${turn.revision_count}`);
+      if (turn.created_at) linesPlain.push(`时间：${turn.created_at}`);
+      if (durationSummary) linesPlain.push(durationSummary);
+      if (draftListItems.length) {
+        draftListItems.forEach((it, idx) => {
+          const n = it.segmentId != null ? it.segmentId : idx + 1;
+          linesPlain.push(`${n}. ${it.description}${it.durationLabel ? `（${it.durationLabel}）` : ""}`);
+        });
+      } else {
+        linesPlain.push("（无分镜条目）");
+      }
+      const plain = linesPlain.join("\n");
+
+      messages.push({
+        id: uid(),
+        role: "assistant",
+        content: plain,
+        copyText: plain,
+        historySegmentDraft: {
+          revisionCount: turn.revision_count != null ? turn.revision_count : null,
+          createdAt: turn.created_at != null ? String(turn.created_at) : null,
+          durationSummary,
+          items: draftListItems,
+          emptySegments: draftListItems.length === 0,
+        },
+      });
+    } else if (kind === "user_action") {
+      const action = turn.action || "unknown";
+      const parts = [`【你的操作】${action}`];
+      if (turn.human_feedback && String(turn.human_feedback).trim()) {
+        parts.push(`反馈：${String(turn.human_feedback).trim()}`);
+      }
+      const edited = Array.isArray(turn.human_edited_segments) ? turn.human_edited_segments : [];
+      if (edited.length) {
+        parts.push("编辑分镜：");
+        const sorted = [...edited].sort((a, b) => (Number(a?.segment_id) || 0) - (Number(b?.segment_id) || 0));
+        for (const s of sorted) {
+          const sid = Number(s?.segment_id);
+          parts.push(`  · ${Number.isFinite(sid) ? sid : "?"}：${getSegmentDescriptionText(s)}`);
+        }
+      }
+      messages.push({ id: uid(), role: "user", content: parts.join("\n") });
+    } else if (kind === "submitted") {
+      messages.push({
+        id: uid(),
+        role: "assistant",
+        content: "【系统】已向视频引擎提交生成任务。",
+      });
+    }
+  }
+
+  const urls = Array.isArray(payload?.final_video_urls) ? payload.final_video_urls.filter(Boolean) : [];
+  if (urls.length) {
+    messages.push({
+      id: uid(),
+      role: "assistant",
+      content: `【成片链接】\n${urls.map((u, i) => `${i + 1}. ${u}`).join("\n")}`,
+    });
+  }
+
+  if (!messages.length) {
+    messages.push({
+      id: uid(),
+      role: "assistant",
+      content: "（该会话暂无历史记录）",
+    });
+  }
+
+  return { messages, lastSegmentDraftFingerprint };
+}
+
+/** 将服务端列表合并进本地 sessions：已绑定 thread 的本地会话不重复插入 */
+function mergeVideoThreadListIntoSessions(serverItems, prevSessions, threadBySessionMap) {
+  const usedThreadIds = new Set(
+    Object.values(threadBySessionMap || {}).filter((t) => typeof t === "string" && t.length > 0),
+  );
+  const itemByTid = new Map(
+    (Array.isArray(serverItems) ? serverItems : [])
+      .filter((it) => it && typeof it.thread_id === "string")
+      .map((it) => [it.thread_id, it]),
+  );
+
+  const next = prevSessions.map((s) => {
+    const tid = threadIdFromServerSessionId(s.id);
+    if (!tid) return s;
+    const it = itemByTid.get(tid);
+    if (!it) return s;
+    const titleRaw = it.title != null ? String(it.title).trim() : "";
+    const ts = it.updated_at ? Date.parse(it.updated_at) : NaN;
+    return {
+      ...s,
+      title: titleRaw || s.title,
+      updatedAt: Number.isFinite(ts) ? ts : s.updatedAt,
+      serverStatus: it.status,
+    };
+  });
+
+  const existingSrvIds = new Set(
+    next.filter((s) => threadIdFromServerSessionId(s.id)).map((s) => s.id),
+  );
+
+  for (const [tid, it] of itemByTid) {
+    if (usedThreadIds.has(tid)) continue;
+    const sid = `${SERVER_THREAD_SESSION_PREFIX}${tid}`;
+    if (existingSrvIds.has(sid)) continue;
+    const titleRaw = it.title != null ? String(it.title).trim() : "";
+    const ts = it.updated_at ? Date.parse(it.updated_at) : NaN;
+    next.push({
+      id: sid,
+      title: titleRaw || `视频任务 ${tid.slice(0, 8)}…`,
+      updatedAt: Number.isFinite(ts) ? ts : Date.now(),
+      serverStatus: it.status,
+    });
+    existingSrvIds.add(sid);
+  }
+
+  return next;
 }
 
 export const loader = async ({ request }) => {
@@ -838,17 +1071,33 @@ export default function VideoChatPage() {
   const [activeSessionId, setActiveSessionId] = useState(() => vcInit.activeSessionId);
   const [messagesBySession, setMessagesBySession] = useState(() => vcInit.messagesBySession);
   const [draft, setDraft] = useState(() => vcInit.draft);
-  const [pendingReferenceAssets, setPendingReferenceAssets] = useState(() => vcInit.pendingReferenceAssets);
+  const [pendingReferenceAssetsBySession, setPendingReferenceAssetsBySession] = useState(
+    () => vcInit.pendingReferenceAssetsBySession,
+  );
   const [createPayloadBySession, setCreatePayloadBySession] = useState(() => vcInit.createPayloadBySession);
   const [sending, setSending] = useState(false);
   const [uploadingReferences, setUploadingReferences] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
-  const [videoParams, setVideoParams] = useState(() => vcInit.videoParams);
+  const [videoParamsBySession, setVideoParamsBySession] = useState(() => vcInit.videoParamsBySession);
   const [paramModalOpen, setParamModalOpen] = useState(false);
   const [referenceRulesModalOpen, setReferenceRulesModalOpen] = useState(false);
-  const [paramDraft, setParamDraft] = useState(() => vcInit.paramDraft);
+  const [paramDraftBySession, setParamDraftBySession] = useState(() => vcInit.paramDraftBySession);
+
+  const videoParams = useMemo(
+    () => videoParamsBySession[activeSessionId] ?? cloneVideoParams(DEFAULT_VIDEO_PARAMS),
+    [videoParamsBySession, activeSessionId],
+  );
+  const pendingReferenceAssets = useMemo(
+    () => pendingReferenceAssetsBySession[activeSessionId] ?? { ...EMPTY_PENDING_REFERENCE_ASSETS },
+    [pendingReferenceAssetsBySession, activeSessionId],
+  );
+  const paramDraft = useMemo(
+    () => paramDraftBySession[activeSessionId] ?? cloneVideoParams(DEFAULT_VIDEO_PARAMS),
+    [paramDraftBySession, activeSessionId],
+  );
+
   const [threadBySession, setThreadBySession] = useState(() => vcInit.threadBySession);
   const [threadViewBySession, setThreadViewBySession] = useState(() => vcInit.threadViewBySession);
   const [threadRequestingBySession, setThreadRequestingBySession] = useState(
@@ -866,6 +1115,7 @@ export default function VideoChatPage() {
   const [segmentSubmittingBySession, setSegmentSubmittingBySession] = useState(
     () => vcInit.segmentSubmittingBySession,
   );
+  const [historyListLoading, setHistoryListLoading] = useState(false);
   const scrollRef = useRef(null);
   const refFileInputRef = useRef(null);
   const wsRef = useRef(null);
@@ -873,6 +1123,7 @@ export default function VideoChatPage() {
   const manualCloseRef = useRef(false);
   const activeSessionIdRef = useRef(activeSessionId);
   const threadStreamRef = useRef({});
+  const threadBySessionRef = useRef(threadBySession);
 
   const historyItems = useMemo(
     () => [...sessions].sort((a, b) => b.updatedAt - a.updatedAt),
@@ -882,12 +1133,26 @@ export default function VideoChatPage() {
   const sidebarUserInitial = sidebarUserName.trim().charAt(0) || "商";
 
   const openParamModal = () => {
-    setParamDraft(cloneVideoParams({ ...videoParams, generationMode: "multimodal_reference" }));
+    const sid = activeSessionId;
+    setParamDraftBySession((prev) => ({
+      ...prev,
+      [sid]: cloneVideoParams({
+        ...(videoParamsBySession[sid] ?? cloneVideoParams(DEFAULT_VIDEO_PARAMS)),
+        generationMode: "multimodal_reference",
+      }),
+    }));
     setParamModalOpen(true);
   };
 
   const saveVideoParams = () => {
-    setVideoParams(cloneVideoParams({ ...paramDraft, generationMode: "multimodal_reference" }));
+    const sid = activeSessionId;
+    setVideoParamsBySession((prev) => ({
+      ...prev,
+      [sid]: cloneVideoParams({
+        ...(paramDraftBySession[sid] ?? cloneVideoParams(DEFAULT_VIDEO_PARAMS)),
+        generationMode: "multimodal_reference",
+      }),
+    }));
     setParamModalOpen(false);
     antMessage.success("视频参数已保存");
   };
@@ -904,21 +1169,35 @@ export default function VideoChatPage() {
   }, [pendingReferenceAssets]);
 
   /** 推广商品图 chip 仅用于展示，不作为参考素材上传。 */
-  const removePendingReferenceSlot = useCallback((bucket, index) => {
-    setPendingReferenceAssets((prev) => {
-      if (bucket === "images") {
-        if (prev.images[index]?.fromBootstrapProduct) return prev;
-        return { ...prev, images: prev.images.filter((_, i) => i !== index) };
-      }
-      if (bucket === "audios") {
-        return { ...prev, audios: prev.audios.filter((_, i) => i !== index) };
-      }
-      if (bucket === "videos") {
-        return { ...prev, videos: prev.videos.filter((_, i) => i !== index) };
-      }
-      return prev;
-    });
-  }, []);
+  const removePendingReferenceSlot = useCallback(
+    (bucket, index) => {
+      const sid = activeSessionId;
+      setPendingReferenceAssetsBySession((prev) => {
+        const cur = prev[sid] ?? { ...EMPTY_PENDING_REFERENCE_ASSETS };
+        if (bucket === "images") {
+          if (cur.images[index]?.fromBootstrapProduct) return prev;
+          return {
+            ...prev,
+            [sid]: { ...cur, images: cur.images.filter((_, i) => i !== index) },
+          };
+        }
+        if (bucket === "audios") {
+          return {
+            ...prev,
+            [sid]: { ...cur, audios: cur.audios.filter((_, i) => i !== index) },
+          };
+        }
+        if (bucket === "videos") {
+          return {
+            ...prev,
+            [sid]: { ...cur, videos: cur.videos.filter((_, i) => i !== index) },
+          };
+        }
+        return prev;
+      });
+    },
+    [activeSessionId],
+  );
 
   /** 已选参考文件的 chip（首图为推广商品图，与上方气泡同源） */
   const referenceAttachmentChipItems = useMemo(() => {
@@ -1056,6 +1335,10 @@ export default function VideoChatPage() {
   }, [threadViewBySession]);
 
   useEffect(() => {
+    threadBySessionRef.current = threadBySession;
+  }, [threadBySession]);
+
+  useEffect(() => {
     generationToSegmentBySessionRef.current = generationToSegmentBySession;
   }, [generationToSegmentBySession]);
 
@@ -1137,7 +1420,7 @@ export default function VideoChatPage() {
       [activeSessionId]: Object.fromEntries(
         activeSegments.map((seg) => {
           const sid = Number(seg?.segment_id);
-          return [sid, parsePositiveDuration(seg?.duration)];
+          return [sid, coerceSegmentDurationFromBackend(seg?.duration)];
         }),
       ),
     }));
@@ -1190,17 +1473,17 @@ export default function VideoChatPage() {
       delete threadStreamRef.current[prevSessionId];
     }
 
+    const sessionId = `s-${uid()}`;
+
     if (incoming.videoParams && typeof incoming.videoParams === "object") {
       const normalizedParams = cloneVideoParams({
         ...DEFAULT_VIDEO_PARAMS,
         ...incoming.videoParams,
         generationMode: "multimodal_reference",
       });
-      setVideoParams(normalizedParams);
-      setParamDraft(normalizedParams);
+      setVideoParamsBySession((prev) => ({ ...prev, [sessionId]: normalizedParams }));
+      setParamDraftBySession((prev) => ({ ...prev, [sessionId]: normalizedParams }));
     }
-
-    const sessionId = `s-${uid()}`;
     const titleCandidate = incoming?.title || incoming?.createPayload?.product?.name || "新生成任务";
     const title = String(titleCandidate).slice(0, 24) || "新生成任务";
     const now = Date.now();
@@ -1241,23 +1524,37 @@ export default function VideoChatPage() {
       const entry = createBootstrapProductImageEntry(productImageUrl, productDisplayName);
       if (entry) {
         const next = { ...EMPTY_PENDING_REFERENCE_ASSETS, images: [entry] };
-        if (validateReferenceAggregates(next).ok) setPendingReferenceAssets(next);
+        if (validateReferenceAggregates(next).ok) {
+          setPendingReferenceAssetsBySession((prev) => ({ ...prev, [sessionId]: next }));
+        }
       }
     }
+
+    setPendingReferenceAssetsBySession((prev) =>
+      prev[sessionId] ? prev : { ...prev, [sessionId]: { ...EMPTY_PENDING_REFERENCE_ASSETS } },
+    );
+    setVideoParamsBySession((prev) =>
+      prev[sessionId] ? prev : { ...prev, [sessionId]: cloneVideoParams(DEFAULT_VIDEO_PARAMS) },
+    );
+    setParamDraftBySession((prev) =>
+      prev[sessionId] ? prev : { ...prev, [sessionId]: cloneVideoParams(DEFAULT_VIDEO_PARAMS) },
+    );
 
     setDraft("");
   }, [location.state, vcInit.hadSnapshot]);
 
-  /** 从历史气泡中的「推广产品」同步首图 chip（会话切换或发送清空后仍可恢复）。 */
+  /** 从历史气泡中的「推广产品」同步首图 chip（按会话；仅在该会话尚无参考图时填充）。 */
   useEffect(() => {
     const found = findBootstrapProductImageInMessages(messages);
     if (!found) return;
-    setPendingReferenceAssets((prev) => {
-      if (prev.images.length > 0) return prev;
+    const sid = activeSessionId;
+    setPendingReferenceAssetsBySession((prev) => {
+      const cur = prev[sid] ?? { ...EMPTY_PENDING_REFERENCE_ASSETS };
+      if (cur.images.length > 0) return prev;
       const entry = createBootstrapProductImageEntry(found.url, found.name);
       if (!entry) return prev;
-      const merged = { ...prev, images: [entry] };
-      return validateReferenceAggregates(merged).ok ? merged : prev;
+      const merged = { ...cur, images: [entry] };
+      return validateReferenceAggregates(merged).ok ? { ...prev, [sid]: merged } : prev;
     });
   }, [activeSessionId, messages]);
 
@@ -1300,6 +1597,10 @@ export default function VideoChatPage() {
   const persistVideoChatSnapshot = useCallback(() => {
     if (typeof sessionStorage === "undefined") return;
     try {
+      const pendingSerialized = {};
+      for (const [k, v] of Object.entries(pendingReferenceAssetsBySession)) {
+        pendingSerialized[k] = serializePendingReferenceAssets(v);
+      }
       const payload = {
         v: VIDEO_CHAT_SNAPSHOT_VERSION,
         savedAt: Date.now(),
@@ -1307,10 +1608,10 @@ export default function VideoChatPage() {
         activeSessionId,
         messagesBySession,
         draft,
-        pendingReferenceAssets: serializePendingReferenceAssets(pendingReferenceAssets),
+        pendingReferenceAssetsBySession: pendingSerialized,
         createPayloadBySession,
-        videoParams,
-        paramDraft,
+        videoParamsBySession,
+        paramDraftBySession,
         threadBySession,
         threadViewBySession,
         generationStatusById,
@@ -1328,10 +1629,10 @@ export default function VideoChatPage() {
     activeSessionId,
     messagesBySession,
     draft,
-    pendingReferenceAssets,
+    pendingReferenceAssetsBySession,
     createPayloadBySession,
-    videoParams,
-    paramDraft,
+    videoParamsBySession,
+    paramDraftBySession,
     threadBySession,
     threadViewBySession,
     generationStatusById,
@@ -1524,18 +1825,19 @@ export default function VideoChatPage() {
 
   const handleNewChat = () => {
     const id = `s-${uid()}`;
+    const defaultVp = cloneVideoParams(DEFAULT_VIDEO_PARAMS);
     setSessions((prev) => [{ id, title: "新对话", updatedAt: Date.now() }, ...prev]);
     setActiveSessionId(id);
     setMessagesBySession((prev) => ({
       ...prev,
       [id]: [{ id: uid(), role: "assistant", content: WELCOME_TEXT, suggestions: true }],
     }));
-    setDraft("");
-  };
-
-  const handleSelectSession = (id) => {
-    if (id === activeSessionId) return;
-    setActiveSessionId(id);
+    setPendingReferenceAssetsBySession((prev) => ({
+      ...prev,
+      [id]: { ...EMPTY_PENDING_REFERENCE_ASSETS },
+    }));
+    setVideoParamsBySession((prev) => ({ ...prev, [id]: cloneVideoParams(defaultVp) }));
+    setParamDraftBySession((prev) => ({ ...prev, [id]: cloneVideoParams(defaultVp) }));
     setDraft("");
   };
 
@@ -1559,13 +1861,11 @@ export default function VideoChatPage() {
       const segments = view.segments;
       if (!Array.isArray(segments) || segments.length === 0) return;
 
-      const sorted = [...segments].sort((a, b) => (Number(a?.segment_id) || 0) - (Number(b?.segment_id) || 0));
-      const fp = `${threadId}|${sorted
-        .map((s) => `${s?.segment_id}:${s?.duration ?? ""}:${s?.mode ?? ""}:${String(s?.description || s?.description_en || "").slice(0, 48)}`)
-        .join("¦")}`;
-      if (segmentChatFingerprintRef.current[sessionId] === fp) return;
+      const fp = buildSegmentDraftFingerprint(threadId, segments);
+      if (!fp || segmentChatFingerprintRef.current[sessionId] === fp) return;
       segmentChatFingerprintRef.current[sessionId] = fp;
 
+      const sorted = [...segments].sort((a, b) => (Number(a?.segment_id) || 0) - (Number(b?.segment_id) || 0));
       let summary = "";
       if (view.total_duration != null) summary += `总时长约 ${view.total_duration}s`;
       if (view.execution_strategy) summary += `${summary ? " · " : ""}${view.execution_strategy}`;
@@ -1665,20 +1965,22 @@ export default function VideoChatPage() {
       bucketAdds.videos.length > 0;
     if (!hasAny) return;
 
-    setPendingReferenceAssets((prev) => {
+    const sid = activeSessionId;
+    setPendingReferenceAssetsBySession((prev) => {
+      const cur = prev[sid] ?? { ...EMPTY_PENDING_REFERENCE_ASSETS };
       const merged = {
-        images: [...prev.images, ...bucketAdds.images],
-        audios: [...prev.audios, ...bucketAdds.audios],
-        videos: [...prev.videos, ...bucketAdds.videos],
+        images: [...cur.images, ...bucketAdds.images],
+        audios: [...cur.audios, ...bucketAdds.audios],
+        videos: [...cur.videos, ...bucketAdds.videos],
       };
       const agg = validateReferenceAggregates(getUserReferenceAssets(merged));
       if (!agg.ok) {
         antMessage.warning(agg.errors[0]);
         return prev;
       }
-      return merged;
+      return { ...prev, [sid]: merged };
     });
-  }, []);
+  }, [activeSessionId]);
 
   const buildDraftCreatePayload = useCallback(
     (text) => {
@@ -1733,6 +2035,52 @@ export default function VideoChatPage() {
       }
     }
   }, [tryAppendSegmentsChat, tryAppendThreadViewProgressChat]);
+
+  /** 拉取 LangGraph 时间线并写入聊天区；需在连接 SSE /state 前完成，便于分镜指纹去重 */
+  const fetchThreadHistoryOnce = useCallback(async (sessionId, threadId) => {
+    try {
+      const res = await authFetch(`${VIDEO_THREAD_API_BASE}/${encodeURIComponent(threadId)}/history`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || (json?.code != null && Number(json.code) !== 0)) {
+        const errText =
+          (json && (json.message || json.detail)) || res.statusText || "请求失败";
+        setMessagesBySession((prev) => ({
+          ...prev,
+          [sessionId]: [
+            {
+              id: uid(),
+              role: "assistant",
+              content: `加载会话历史失败：${typeof errText === "string" ? errText : "未知错误"}`,
+            },
+          ],
+        }));
+        return;
+      }
+      const data = json?.data || {};
+      const { messages, lastSegmentDraftFingerprint } = buildMessagesFromThreadHistoryPayload(
+        threadId,
+        data,
+      );
+      if (lastSegmentDraftFingerprint) {
+        segmentChatFingerprintRef.current[sessionId] = lastSegmentDraftFingerprint;
+      }
+      setMessagesBySession((prev) => ({ ...prev, [sessionId]: messages }));
+    } catch (e) {
+      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+        antMessage.warning("登录已过期，请返回首页重新登录");
+      }
+      setMessagesBySession((prev) => ({
+        ...prev,
+        [sessionId]: [
+          {
+            id: uid(),
+            role: "assistant",
+            content: `加载会话历史失败：${e instanceof Error ? e.message : "网络异常"}`,
+          },
+        ],
+      }));
+    }
+  }, []);
 
   const startThreadStream = useCallback(
     (sessionId, threadId) => {
@@ -1920,6 +2268,65 @@ export default function VideoChatPage() {
     [appendAssistantMessage, closeThreadStream, fetchThreadStateOnce, tryAppendSegmentsChat, tryAppendThreadViewProgressChat]
   );
 
+  const fetchVideoThreadList = useCallback(async (opts) => {
+    const showLoading = Boolean(opts?.showLoading);
+    if (showLoading) setHistoryListLoading(true);
+    try {
+      const res = await authFetch(`${VIDEO_THREAD_API_BASE}/list?limit=50&offset=0`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      if (json?.code != null && Number(json.code) !== 0) return;
+      const items = Array.isArray(json?.data?.items) ? json.data.items : [];
+      setSessions((prev) =>
+        mergeVideoThreadListIntoSessions(items, prev, threadBySessionRef.current),
+      );
+    } catch (e) {
+      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+        antMessage.warning("登录已过期，请返回首页重新登录");
+      }
+    } finally {
+      if (showLoading) setHistoryListLoading(false);
+    }
+  }, []);
+
+  const handleSelectSession = useCallback(
+    (id) => {
+      if (id === activeSessionId) return;
+      const prevId = activeSessionIdRef.current;
+      setActiveSessionId(id);
+      setDraft("");
+      setParamModalOpen(false);
+      setPendingReferenceAssetsBySession((p) =>
+        p[id] ? p : { ...p, [id]: { ...EMPTY_PENDING_REFERENCE_ASSETS } },
+      );
+      setVideoParamsBySession((p) =>
+        p[id] ? p : { ...p, [id]: cloneVideoParams(DEFAULT_VIDEO_PARAMS) },
+      );
+      setParamDraftBySession((p) =>
+        p[id] ? p : { ...p, [id]: cloneVideoParams(DEFAULT_VIDEO_PARAMS) },
+      );
+      if (prevId && prevId !== id) closeThreadStream(prevId);
+      const tid = threadIdFromServerSessionId(id);
+      if (!tid) return;
+      setThreadBySession((p) => ({ ...p, [id]: tid }));
+      setMessagesBySession((prev) => ({
+        ...prev,
+        [id]: [{ id: uid(), role: "assistant", content: "正在加载会话历史…" }],
+      }));
+      void (async () => {
+        await fetchThreadHistoryOnce(id, tid);
+        startThreadStream(id, tid);
+        void fetchThreadStateOnce(id, tid);
+      })();
+    },
+    [activeSessionId, closeThreadStream, fetchThreadHistoryOnce, fetchThreadStateOnce, startThreadStream],
+  );
+
+  useEffect(() => {
+    if (authChecking) return;
+    void fetchVideoThreadList({ showLoading: true });
+  }, [authChecking, fetchVideoThreadList]);
+
   const createVideoThread = useCallback(
     async (sessionId, payload, successMessage = "线程创建成功，开始监听进度…") => {
       setThreadRequestingBySession((prev) => ({ ...prev, [sessionId]: true }));
@@ -1947,6 +2354,7 @@ export default function VideoChatPage() {
         appendAssistantMessage(sessionId, `${successMessage}（thread_id: ${threadId}）`);
         startThreadStream(sessionId, threadId);
         void fetchThreadStateOnce(sessionId, threadId);
+        void fetchVideoThreadList();
         return threadId;
       } catch (e) {
         const errorText = e instanceof Error ? e.message : "创建线程失败";
@@ -1961,7 +2369,7 @@ export default function VideoChatPage() {
         setThreadRequestingBySession((prev) => ({ ...prev, [sessionId]: false }));
       }
     },
-    [appendAssistantMessage, fetchThreadStateOnce, startThreadStream, tryAppendThreadViewProgressChat]
+    [appendAssistantMessage, fetchThreadStateOnce, fetchVideoThreadList, startThreadStream, tryAppendThreadViewProgressChat]
   );
 
   const resumeVideoThread = useCallback(
@@ -2018,9 +2426,9 @@ export default function VideoChatPage() {
         antMessage.warning(`分镜 #${sid} 的描述不能为空`);
         return;
       }
-      const duration = parsePositiveDuration(activeSegmentDurationDraftMap[sid] ?? segment?.duration);
-      if (duration == null) {
-        antMessage.warning(`分镜 #${sid} 的时长必须大于 0 秒`);
+      const duration = resolveSegmentDurationDraft(sid, activeSegmentDurationDraftMap, segment);
+      if (!isAllowedSegmentDuration(duration)) {
+        antMessage.warning(`分镜 #${sid} 的时长须为 4–15 秒或「模型自主选择」(-1)`);
         return;
       }
       setSegmentSubmittingBySession((prev) => ({
@@ -2090,7 +2498,10 @@ export default function VideoChatPage() {
       );
 
       await createVideoThread(sessionId, payload);
-      setPendingReferenceAssets({ ...EMPTY_PENDING_REFERENCE_ASSETS });
+      setPendingReferenceAssetsBySession((prev) => ({
+        ...prev,
+        [sessionId]: { ...EMPTY_PENDING_REFERENCE_ASSETS },
+      }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : "发送失败";
       antMessage.error(msg);
@@ -2162,14 +2573,13 @@ export default function VideoChatPage() {
         antMessage.warning(`分镜 #${sid} 的描述不能为空`);
         return;
       }
-      const draftDuration = parsePositiveDuration(activeSegmentDurationDraftMap[sid] ?? seg?.duration);
-      if (draftDuration == null) {
-        antMessage.warning(`分镜 #${sid} 的时长必须大于 0 秒`);
+      const draftDuration = resolveSegmentDurationDraft(sid, activeSegmentDurationDraftMap, seg);
+      if (!isAllowedSegmentDuration(draftDuration)) {
+        antMessage.warning(`分镜 #${sid} 的时长须为 4–15 秒或「模型自主选择」(-1)`);
         return;
       }
-      const originalDuration = parsePositiveDuration(seg?.duration);
-      const durationChanged =
-        originalDuration == null ? draftDuration != null : Math.abs(draftDuration - originalDuration) > 0.001;
+      const originalCoerced = coerceSegmentDurationFromBackend(seg?.duration);
+      const durationChanged = draftDuration !== originalCoerced;
       if (!durationChanged && draftText === originalText) continue;
       editedSegments.push({
         segment_id: sid,
@@ -2276,7 +2686,8 @@ export default function VideoChatPage() {
               const meta = getSegmentStatusMeta(activeThreadView?.status, activeTaskStatusMap[sid]);
               const segmentVideoUrl = activeSegmentVideoUrlMap[sid] || "";
               const draftValue = activeSegmentDraftMap[sid] ?? getSegmentDescriptionText(seg);
-              const durationValue = activeSegmentDurationDraftMap[sid] ?? parsePositiveDuration(seg?.duration);
+              const durationValue = resolveSegmentDurationDraft(sid, activeSegmentDurationDraftMap, seg);
+              const durationTriggerDisabled = !activeWaitingHuman || activeThreadRequesting;
               return (
                 <div key={sid} className="video-chat-segment-item">
                   <div className="video-chat-segment-item__top">
@@ -2287,17 +2698,51 @@ export default function VideoChatPage() {
                     {seg?.mode ? <span>{seg.mode}</span> : null}
                     <div className="video-chat-segment-duration">
                       <span>时长</span>
-                      <InputNumber
-                        aria-label={`分镜 #${sid} 时长`}
-                        min={0.1}
-                        step={0.5}
-                        precision={1}
-                        size="small"
-                        value={durationValue}
-                        disabled={!activeWaitingHuman || activeThreadRequesting}
-                        onChange={(value) => handleSegmentDurationDraftChange(sid, value)}
-                        addonAfter="s"
-                      />
+                      <span className="video-chat-segment-duration__value" aria-live="polite">
+                        {durationValue === SEGMENT_DURATION_AUTONOMOUS ? (
+                          <>
+                            -1
+                            <span className="video-chat-segment-duration__hint">（模型自主选择）</span>
+                          </>
+                        ) : (
+                          `${durationValue}s`
+                        )}
+                      </span>
+                      <Dropdown
+                        disabled={durationTriggerDisabled}
+                        menu={{
+                          items: [
+                            {
+                              key: "auto",
+                              label: (
+                                <span>
+                                  -1
+                                  <span className="video-chat-segment-duration__hint"> 模型自主选择</span>
+                                </span>
+                              ),
+                            },
+                            { type: "divider" },
+                            ...SEGMENT_DURATION_SECONDS.map((s) => ({
+                              key: String(s),
+                              label: `${s}s`,
+                            })),
+                          ],
+                          onClick: ({ key }) => {
+                            if (key === "auto") handleSegmentDurationDraftChange(sid, SEGMENT_DURATION_AUTONOMOUS);
+                            else handleSegmentDurationDraftChange(sid, Number(key));
+                          },
+                        }}
+                        trigger={["click"]}
+                      >
+                        <Button
+                          type="text"
+                          size="small"
+                          className="video-chat-segment-duration__trigger"
+                          icon={<DownOutlined />}
+                          aria-label={`分镜 #${sid} 选择时长`}
+                          disabled={durationTriggerDisabled}
+                        />
+                      </Dropdown>
                     </div>
                   </div>
                   <Input.TextArea
@@ -2394,26 +2839,15 @@ export default function VideoChatPage() {
             {sidebarExpanded ? "新对话" : null}
           </Button>
 
-          <div className="video-chat-sidebar__section">
-            {sidebarExpanded && (
-              <div className="video-chat-sidebar__section-title">
-                <CheckSquareOutlined /> 任务列表
-              </div>
-            )}
-            <ul className="video-chat-task-list">
-              {MOCK_TASKS.map((t) => (
-                <li key={t.id} className={t.active ? "is-active" : ""} title={t.label}>
-                  <span className="video-chat-task-dot" aria-hidden />
-                  {sidebarExpanded && <span className="video-chat-task-label">{t.label}</span>}
-                </li>
-              ))}
-            </ul>
-          </div>
-
           <div className="video-chat-sidebar__section video-chat-sidebar__section--grow">
             {sidebarExpanded && (
               <div className="video-chat-sidebar__section-title">
                 <HistoryOutlined /> 历史对话
+                {historyListLoading ? (
+                  <span className="video-chat-history-list__loading" aria-live="polite">
+                    同步中…
+                  </span>
+                ) : null}
               </div>
             )}
             <ul className="video-chat-history-list">
@@ -2488,6 +2922,46 @@ export default function VideoChatPage() {
                   <div className="video-chat-msg__content">
                     {m.bootstrapContext ? (
                       <VideoChatBootstrapContextCard context={m.bootstrapContext} />
+                    ) : m.historySegmentDraft ? (
+                      <div className="video-chat-history-draft">
+                        <div className="video-chat-history-draft__title">【分镜草稿】</div>
+                        {m.historySegmentDraft.revisionCount != null ? (
+                          <div className="video-chat-history-draft__meta">
+                            修订轮次：{m.historySegmentDraft.revisionCount}
+                          </div>
+                        ) : null}
+                        {m.historySegmentDraft.createdAt ? (
+                          <div className="video-chat-history-draft__meta">
+                            时间：{m.historySegmentDraft.createdAt}
+                          </div>
+                        ) : null}
+                        {m.historySegmentDraft.durationSummary ? (
+                          <div className="video-chat-history-draft__meta">
+                            {m.historySegmentDraft.durationSummary}
+                          </div>
+                        ) : null}
+                        {m.historySegmentDraft.emptySegments ? (
+                          <p className="video-chat-history-draft__empty">（无分镜条目）</p>
+                        ) : (
+                          <ol className="video-chat-history-draft__list" aria-label="分镜列表">
+                            {m.historySegmentDraft.items.map((it, idx) => (
+                              <li
+                                key={`${m.id}-draft-${it.segmentId ?? "x"}-${idx}`}
+                                className="video-chat-history-draft__item"
+                              >
+                                <span className="video-chat-history-draft__item-text">
+                                  {it.description}
+                                  {it.durationLabel ? (
+                                    <span className="video-chat-history-draft__dur">
+                                      （{it.durationLabel}）
+                                    </span>
+                                  ) : null}
+                                </span>
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                      </div>
                     ) : (
                       m.content
                     )}
@@ -2733,7 +3207,12 @@ export default function VideoChatPage() {
             <Select
               id="vp-resolution"
               value={paramDraft.resolution}
-              onChange={(v) => setParamDraft((p) => ({ ...p, resolution: v }))}
+              onChange={(v) =>
+                setParamDraftBySession((prev) => {
+                  const base = prev[activeSessionId] ?? cloneVideoParams(DEFAULT_VIDEO_PARAMS);
+                  return { ...prev, [activeSessionId]: { ...base, resolution: v } };
+                })
+              }
               options={RESOLUTION_OPTIONS}
               style={{ width: "100%" }}
             />
@@ -2746,7 +3225,12 @@ export default function VideoChatPage() {
             <Select
               id="vp-ratio"
               value={paramDraft.ratio}
-              onChange={(v) => setParamDraft((p) => ({ ...p, ratio: v }))}
+              onChange={(v) =>
+                setParamDraftBySession((prev) => {
+                  const base = prev[activeSessionId] ?? cloneVideoParams(DEFAULT_VIDEO_PARAMS);
+                  return { ...prev, [activeSessionId]: { ...base, ratio: v } };
+                })
+              }
               options={RATIO_OPTIONS}
               style={{ width: "100%" }}
             />
@@ -2754,19 +3238,40 @@ export default function VideoChatPage() {
 
           <div className="video-chat-param-row video-chat-param-row--switch">
             <span className="video-chat-param-label">携带 AI 生成水印</span>
-            <Switch checked={paramDraft.watermark} onChange={(v) => setParamDraft((p) => ({ ...p, watermark: v }))} />
+            <Switch
+              checked={paramDraft.watermark}
+              onChange={(v) =>
+                setParamDraftBySession((prev) => {
+                  const base = prev[activeSessionId] ?? cloneVideoParams(DEFAULT_VIDEO_PARAMS);
+                  return { ...prev, [activeSessionId]: { ...base, watermark: v } };
+                })
+              }
+            />
           </div>
 
           <div className="video-chat-param-row video-chat-param-row--switch">
             <span className="video-chat-param-label">生成音频</span>
-            <Switch checked={paramDraft.generateAudio} onChange={(v) => setParamDraft((p) => ({ ...p, generateAudio: v }))} />
+            <Switch
+              checked={paramDraft.generateAudio}
+              onChange={(v) =>
+                setParamDraftBySession((prev) => {
+                  const base = prev[activeSessionId] ?? cloneVideoParams(DEFAULT_VIDEO_PARAMS);
+                  return { ...prev, [activeSessionId]: { ...base, generateAudio: v } };
+                })
+              }
+            />
           </div>
 
           <div className="video-chat-param-row">
             <span className="video-chat-param-label">返回文字语言</span>
             <Select
               value={paramDraft.responseLang}
-              onChange={(v) => setParamDraft((p) => ({ ...p, responseLang: v }))}
+              onChange={(v) =>
+                setParamDraftBySession((prev) => {
+                  const base = prev[activeSessionId] ?? cloneVideoParams(DEFAULT_VIDEO_PARAMS);
+                  return { ...prev, [activeSessionId]: { ...base, responseLang: v } };
+                })
+              }
               options={RESPONSE_LANG_OPTIONS}
               style={{ width: "100%" }}
             />

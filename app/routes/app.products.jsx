@@ -1,11 +1,29 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Button, Empty, Input, Space, Spin, Table, Tag, message } from "antd";
+import {
+  Alert,
+  Button,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Spin,
+  Table,
+  Tag,
+  message,
+} from "antd";
 import { authFetch } from "../utils/auth-api";
+import { ProductImageUrlField } from "../components/ProductImageUrlField";
 
+const MERCHANT_INFO_URL = "/api/v1/merchant/info";
 const PRODUCTS_API_BASE = "/api/v1/products";
+const LOCAL_PRODUCTS_BASE = "/api/v1/local-products";
 
 function parseProductListResponse(json) {
   const rows = Array.isArray(json?.data)
@@ -51,12 +69,51 @@ export const loader = async ({ request }) => {
   return null;
 };
 
+const STATUS_OPTIONS = [
+  { value: "active", label: "上架 active" },
+  { value: "draft", label: "草稿 draft" },
+  { value: "archived", label: "归档 archived" },
+];
+
 export default function ProductsPage() {
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [keyword, setKeyword] = useState("");
+
+  /** 商户类型：standalone 可维护本地商品表；shopify 仅只读浏览 */
+  const [accountType, setAccountType] = useState(null);
+  const [merchantLoading, setMerchantLoading] = useState(true);
+
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editorSubmitting, setEditorSubmitting] = useState(false);
+  const [form] = Form.useForm();
+
+  const isStandalone = accountType === "standalone";
+
+  const loadMerchant = useCallback(async () => {
+    setMerchantLoading(true);
+    try {
+      const res = await authFetch(MERCHANT_INFO_URL);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAccountType("shopify");
+        return;
+      }
+      const data = json?.data ?? json;
+      setAccountType(data?.account_type || "shopify");
+    } catch (e) {
+      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+        setAccountType(null);
+      } else {
+        setAccountType("shopify");
+      }
+    } finally {
+      setMerchantLoading(false);
+    }
+  }, []);
 
   const loadProducts = async () => {
     setLoading(true);
@@ -85,9 +142,111 @@ export default function ProductsPage() {
   };
 
   useEffect(() => {
+    loadMerchant();
+  }, [loadMerchant]);
+
+  useEffect(() => {
     loadProducts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const openCreate = () => {
+    setEditingId(null);
+    form.resetFields();
+    form.setFieldsValue({
+      status: "active",
+      inventory: 0,
+      price: 0,
+    });
+    setEditorOpen(true);
+  };
+
+  const openEdit = async (id) => {
+    setEditingId(id);
+    setEditorOpen(true);
+    form.resetFields();
+    try {
+      const res = await authFetch(`${LOCAL_PRODUCTS_BASE}/${id}`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        message.error(json?.message || json?.detail || "加载商品失败");
+        setEditorOpen(false);
+        return;
+      }
+      const row = json?.data ?? json;
+      form.setFieldsValue({
+        title: row.title,
+        description: row.description ?? "",
+        price: row.price != null ? Number(row.price) : 0,
+        compare_at_price: row.compare_at_price != null ? Number(row.compare_at_price) : undefined,
+        image_url: row.image_url ?? "",
+        inventory: row.inventory ?? 0,
+        product_type: row.product_type ?? "",
+        status: row.status ?? "active",
+      });
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "网络错误");
+      setEditorOpen(false);
+    }
+  };
+
+  const submitEditor = async () => {
+    try {
+      const values = await form.validateFields();
+      setEditorSubmitting(true);
+      const payload = {
+        title: values.title?.trim(),
+        description: values.description || null,
+        price: values.price ?? 0,
+        compare_at_price: values.compare_at_price ?? null,
+        image_url: values.image_url?.trim() || null,
+        inventory: values.inventory ?? 0,
+        product_type: values.product_type?.trim() || null,
+        status: values.status || "active",
+      };
+
+      const url = editingId == null ? LOCAL_PRODUCTS_BASE : `${LOCAL_PRODUCTS_BASE}/${editingId}`;
+      const method = editingId == null ? "POST" : "PUT";
+      const res = await authFetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = json?.detail || json?.message || json?.data?.message || "保存失败";
+        message.error(typeof detail === "string" ? detail : "保存失败");
+        return;
+      }
+      if (json.code !== 0 && json.code !== undefined && json.code !== 200) {
+        message.error(json.message || "保存失败");
+        return;
+      }
+      message.success(editingId == null ? "已创建" : "已更新");
+      setEditorOpen(false);
+      loadProducts();
+    } catch (e) {
+      if (e?.errorFields) return;
+      message.error(e instanceof Error ? e.message : "保存失败");
+    } finally {
+      setEditorSubmitting(false);
+    }
+  };
+
+  const deleteProduct = async (id) => {
+    try {
+      const res = await authFetch(`${LOCAL_PRODUCTS_BASE}/${id}`, { method: "DELETE" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        message.error(json?.detail || json?.message || "删除失败");
+        return;
+      }
+      message.success("已删除");
+      loadProducts();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "网络错误");
+    }
+  };
 
   const filteredProducts = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
@@ -146,18 +305,34 @@ export default function ProductsPage() {
     {
       title: "操作",
       key: "action",
-      width: 120,
+      width: isStandalone ? 220 : 120,
       render: (_, record) => (
-        <Button
-          type="link"
-          style={{ padding: 0 }}
-          onClick={() => navigate(`/app/products/${encodeURIComponent(String(record.id))}`)}
-        >
-          查看详情
-        </Button>
+        <Space size="small" wrap>
+          <Button
+            type="link"
+            style={{ padding: 0 }}
+            onClick={() => navigate(`/app/products/${encodeURIComponent(String(record.id))}`)}
+          >
+            查看详情
+          </Button>
+          {isStandalone ? (
+            <>
+              <Button type="link" style={{ padding: 0 }} onClick={() => openEdit(record.id)}>
+                编辑
+              </Button>
+              <Popconfirm title="确定删除该商品？" onConfirm={() => deleteProduct(record.id)}>
+                <Button type="link" danger style={{ padding: 0 }}>
+                  删除
+                </Button>
+              </Popconfirm>
+            </>
+          ) : null}
+        </Space>
       ),
     },
   ];
+
+  const pageBusy = merchantLoading || loading;
 
   return (
     <>
@@ -171,6 +346,18 @@ export default function ProductsPage() {
         <s-section heading="商品管理">
           <div className="dash-shell dash-section-inner">
             <Space direction="vertical" size={12} style={{ width: "100%" }}>
+              {!merchantLoading && accountType != null && (
+                <Alert
+                  type={isStandalone ? "info" : "warning"}
+                  showIcon
+                  message={
+                    isStandalone
+                      ? "当前为平台自注册账号，可在此新增、编辑、删除本地商品。"
+                      : "当前为 Shopify 店铺账号，商品数据来自店铺，此处仅支持查看。"
+                  }
+                />
+              )}
+
               <div style={{ display: "flex", gap: 12, justifyContent: "space-between", flexWrap: "wrap" }}>
                 <Input
                   style={{ width: 320, maxWidth: "100%" }}
@@ -178,10 +365,17 @@ export default function ProductsPage() {
                   value={keyword}
                   onChange={(e) => setKeyword(e.target.value)}
                 />
-                <Button onClick={loadProducts}>刷新列表</Button>
+                <Space>
+                  {isStandalone ? (
+                    <Button type="primary" onClick={openCreate}>
+                      新建商品
+                    </Button>
+                  ) : null}
+                  <Button onClick={loadProducts}>刷新列表</Button>
+                </Space>
               </div>
 
-              {loading ? (
+              {pageBusy ? (
                 <div className="dash-page-loading">
                   <Spin size="large" />
                 </div>
@@ -190,7 +384,7 @@ export default function ProductsPage() {
                   description={`加载失败：${error}`}
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                 >
-                  <Button onClick={loadProducts}>重试</Button>
+                  <Button onClick={() => { loadMerchant(); loadProducts(); }}>重试</Button>
                 </Empty>
               ) : (
                 <Table
@@ -198,7 +392,7 @@ export default function ProductsPage() {
                   columns={columns}
                   dataSource={filteredProducts}
                   pagination={{ pageSize: 10, showSizeChanger: false }}
-                  scroll={{ x: 860 }}
+                  scroll={{ x: isStandalone ? 960 : 860 }}
                   locale={{ emptyText: "暂无商品数据" }}
                 />
               )}
@@ -206,6 +400,41 @@ export default function ProductsPage() {
           </div>
         </s-section>
       </s-page>
+
+      <Modal
+        title={editingId == null ? "新建商品" : "编辑商品"}
+        open={editorOpen}
+        onCancel={() => setEditorOpen(false)}
+        onOk={submitEditor}
+        confirmLoading={editorSubmitting}
+        destroyOnHidden
+        width={560}
+      >
+        <Form form={form} layout="vertical" style={{ marginTop: 8 }}>
+          <Form.Item name="title" label="标题" rules={[{ required: true, message: "请填写标题" }]}>
+            <Input placeholder="商品标题" maxLength={512} showCount />
+          </Form.Item>
+          <Form.Item name="description" label="描述">
+            <Input.TextArea rows={3} placeholder="纯文本描述" />
+          </Form.Item>
+          <Form.Item name="price" label="售价" rules={[{ required: true, message: "请填写售价" }]}>
+            <InputNumber min={0} step={0.01} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="compare_at_price" label="划线价（可选）">
+            <InputNumber min={0} step={0.01} style={{ width: "100%" }} />
+          </Form.Item>
+          <ProductImageUrlField />
+          <Form.Item name="inventory" label="库存">
+            <InputNumber min={0} step={1} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="product_type" label="商品类型">
+            <Input placeholder="用于筛选与展示" />
+          </Form.Item>
+          <Form.Item name="status" label="状态" rules={[{ required: true }]}>
+            <Select options={STATUS_OPTIONS} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </>
   );
 }
