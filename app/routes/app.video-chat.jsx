@@ -321,6 +321,104 @@ function deepCloneJson(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
+/** 将 GET /video-thread/{id}/history 根级的 product / product_for_prompt 合并进 create 载荷（供恢复会话与通过分镜提示）。 */
+function buildMergedCreatePayloadWithHistory(prevPayload, historyRoot) {
+  const product = historyRoot?.product;
+  const productForPrompt = historyRoot?.product_for_prompt;
+  const hasHistoryProduct =
+    (product && typeof product === "object" && Object.keys(product).length > 0) ||
+    (productForPrompt && typeof productForPrompt === "object" && Object.keys(productForPrompt).length > 0);
+  if (!hasHistoryProduct) {
+    return prevPayload;
+  }
+
+  const base =
+    prevPayload && typeof prevPayload === "object" && Object.keys(prevPayload).length > 0
+      ? deepCloneJson(prevPayload)
+      : {
+          trend: { title: "", summary: "", tags: [], audience: null },
+          brand: null,
+          product: {
+            product_id: 0,
+            name: "",
+            description: "",
+            size_description: "",
+            price: 0,
+            image_url: "",
+            inventory: 0,
+            variants: null,
+          },
+          user_input: "",
+          generation_mode: BACKEND_GENERATION_MODE_MULTIMODAL,
+          config_params: {
+            resolution: "720p",
+            ratio: "adaptive",
+            language: "zh",
+            watermark: false,
+            generate_audio: true,
+          },
+          media_assets: null,
+        };
+
+  const mergedProduct = {
+    ...(typeof base.product === "object" && base.product ? base.product : {}),
+  };
+  if (product && typeof product === "object") {
+    Object.assign(mergedProduct, product);
+  }
+  if (productForPrompt && typeof productForPrompt === "object") {
+    const sz = productForPrompt.size_description;
+    if (typeof sz === "string" && sz.trim() && !String(mergedProduct.size_description || "").trim()) {
+      mergedProduct.size_description = sz.trim();
+    }
+    if (!mergedProduct.name && productForPrompt.name) {
+      mergedProduct.name = String(productForPrompt.name);
+    }
+    if (!mergedProduct.image_url && productForPrompt.image_url) {
+      mergedProduct.image_url = String(productForPrompt.image_url);
+    }
+    if ((mergedProduct.price == null || mergedProduct.price === "") && productForPrompt.price != null) {
+      mergedProduct.price = productForPrompt.price;
+    }
+  }
+  base.product = mergedProduct;
+  return base;
+}
+
+async function loadThreadHistoryPayload(threadId) {
+  const res = await authFetch(`${VIDEO_THREAD_API_BASE}/${encodeURIComponent(threadId)}/history`);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || (json?.code != null && Number(json.code) !== 0)) {
+    const errText =
+      (json && (json.message || json.detail)) || res.statusText || "请求失败";
+    return { ok: false, data: null, errText };
+  }
+  return { ok: true, data: json?.data || {}, errText: null };
+}
+
+function hydrateProductReferenceFromHistory(sessionId, historyRoot, setPendingReferenceAssetsBySession) {
+  const product = historyRoot?.product;
+  const productForPrompt = historyRoot?.product_for_prompt;
+  const imgRaw =
+    (product && typeof product.image_url === "string" && product.image_url.trim()) ||
+    (productForPrompt && typeof productForPrompt.image_url === "string" && productForPrompt.image_url.trim()) ||
+    "";
+  if (!imgRaw || !/^https?:\/\//i.test(imgRaw)) return;
+  const nameRaw =
+    (product && typeof product.name === "string" && product.name.trim()) ||
+    (productForPrompt && typeof productForPrompt.name === "string" && productForPrompt.name.trim()) ||
+    "";
+  setPendingReferenceAssetsBySession((prev) => {
+    const cur = prev[sessionId] ?? { ...EMPTY_PENDING_REFERENCE_ASSETS };
+    if (cur.images.length > 0) return prev;
+    const entry = createBootstrapProductImageEntry(imgRaw, nameRaw);
+    if (!entry) return prev;
+    const next = { ...EMPTY_PENDING_REFERENCE_ASSETS, images: [entry] };
+    if (!validateReferenceAggregates(next).ok) return prev;
+    return { ...prev, [sessionId]: next };
+  });
+}
+
 function parseGenerateBootstrap(raw) {
   if (!raw || typeof raw !== "object") return null;
   if (!raw.createPayload || typeof raw.createPayload !== "object") return null;
@@ -2039,11 +2137,8 @@ export default function VideoChatPage() {
   /** 拉取 LangGraph 时间线并写入聊天区；需在连接 SSE /state 前完成，便于分镜指纹去重 */
   const fetchThreadHistoryOnce = useCallback(async (sessionId, threadId) => {
     try {
-      const res = await authFetch(`${VIDEO_THREAD_API_BASE}/${encodeURIComponent(threadId)}/history`);
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || (json?.code != null && Number(json.code) !== 0)) {
-        const errText =
-          (json && (json.message || json.detail)) || res.statusText || "请求失败";
+      const { ok, data, errText } = await loadThreadHistoryPayload(threadId);
+      if (!ok || !data) {
         setMessagesBySession((prev) => ({
           ...prev,
           [sessionId]: [
@@ -2056,7 +2151,11 @@ export default function VideoChatPage() {
         }));
         return;
       }
-      const data = json?.data || {};
+      setCreatePayloadBySession((prev) => ({
+        ...prev,
+        [sessionId]: buildMergedCreatePayloadWithHistory(prev[sessionId], data),
+      }));
+      hydrateProductReferenceFromHistory(sessionId, data, setPendingReferenceAssetsBySession);
       const { messages, lastSegmentDraftFingerprint } = buildMessagesFromThreadHistoryPayload(
         threadId,
         data,
@@ -2080,7 +2179,7 @@ export default function VideoChatPage() {
         ],
       }));
     }
-  }, []);
+  }, [setCreatePayloadBySession, setPendingReferenceAssetsBySession]);
 
   const startThreadStream = useCallback(
     (sessionId, threadId) => {
@@ -2611,10 +2710,29 @@ export default function VideoChatPage() {
       if (!threadId) continue;
       const view = vcInit.threadViewBySession?.[sessionId];
       if (view?.status === "finished" || view?.status === "error") continue;
+      void (async () => {
+        const { ok, data } = await loadThreadHistoryPayload(threadId);
+        if (ok && data) {
+          setCreatePayloadBySession((prev) => ({
+            ...prev,
+            [sessionId]: buildMergedCreatePayloadWithHistory(prev[sessionId], data),
+          }));
+          hydrateProductReferenceFromHistory(sessionId, data, setPendingReferenceAssetsBySession);
+        }
+      })();
       startThreadStream(sessionId, threadId);
       void fetchThreadStateOnce(sessionId, threadId);
     }
-  }, [authChecking, vcInit.hadSnapshot, vcInit.threadBySession, vcInit.threadViewBySession, startThreadStream, fetchThreadStateOnce]);
+  }, [
+    authChecking,
+    vcInit.hadSnapshot,
+    vcInit.threadBySession,
+    vcInit.threadViewBySession,
+    startThreadStream,
+    fetchThreadStateOnce,
+    setCreatePayloadBySession,
+    setPendingReferenceAssetsBySession,
+  ]);
 
   const handleReconnectActiveThread = useCallback(() => {
     const threadId = threadBySession[activeSessionId];

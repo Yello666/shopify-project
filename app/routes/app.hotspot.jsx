@@ -748,6 +748,9 @@ export default function Hotspot() {
               <Button type={scheduleState.is_enabled ? "primary" : "default"} onClick={openScheduleModal} loading={scheduleLoading}>
                 定时推荐：{scheduleState.is_enabled ? "已开启" : "已关闭"}
               </Button>
+              <Button onClick={() => navigate("/app/own-hotspot")}>
+                我的热点
+              </Button>
               {recommendationMode ? (
                 <Button type="default" onClick={() => setRecommendationMode(false)}>
                   取消过滤

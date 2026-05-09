@@ -3,21 +3,28 @@ import { useParams, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import {
+  Alert,
   Button,
-  Spin,
-  Tag,
   Descriptions,
-  Modal,
   Form,
   Input,
   InputNumber,
-  Select,
+  Modal,
   Popconfirm,
+  Select,
+  Space,
+  Spin,
+  Tag,
   message,
-  Alert,
 } from "antd";
 import { authFetch } from "../utils/auth-api";
 import { ProductImageUrlField } from "../components/ProductImageUrlField";
+import {
+  createProductSizeCmGroupRule,
+  formatProductSizeDescriptionCm,
+  formatSizeDescriptionForDisplay,
+  parseProductSizeDescriptionCm,
+} from "../utils/productDimensionsCm";
 
 const MERCHANT_INFO_URL = "/api/v1/merchant/info";
 const PRODUCTS_API_BASE = "/api/v1/products";
@@ -28,6 +35,9 @@ const STATUS_OPTIONS = [
   { value: "draft", label: "草稿 draft" },
   { value: "archived", label: "归档 archived" },
 ];
+
+const SIZE_CM_FORM_NAMES = ["size_length_cm", "size_width_cm", "size_height_cm"];
+const SIZE_CM_GROUP_RULE = createProductSizeCmGroupRule();
 
 function normalizeShopifyProduct(raw) {
   if (!raw || typeof raw !== "object") return raw;
@@ -75,6 +85,7 @@ function normalizeLocalProduct(raw) {
     id,
     title,
     body_html: desc,
+    size_description: raw.size_description ?? "",
     _plainDescription: true,
     vendor: "—",
     product_type: raw.product_type ?? "",
@@ -162,9 +173,13 @@ export default function ProductDetail() {
 
   const openEdit = () => {
     if (!product || !isStandalone) return;
+    const dims = parseProductSizeDescriptionCm(product.size_description);
     form.setFieldsValue({
       title: product.title,
       description: product._plainDescription ? product.body_html : "",
+      size_length_cm: dims.length_cm,
+      size_width_cm: dims.width_cm,
+      size_height_cm: dims.height_cm,
       price: product.variants?.[0]?.price != null ? Number(product.variants[0].price) : 0,
       compare_at_price:
         product.variants?.[0]?.compare_at_price != null
@@ -182,9 +197,15 @@ export default function ProductDetail() {
     try {
       const values = await form.validateFields();
       setEditorSubmitting(true);
+      const size_description = formatProductSizeDescriptionCm(
+        values.size_length_cm,
+        values.size_width_cm,
+        values.size_height_cm,
+      );
       const payload = {
         title: values.title?.trim(),
         description: values.description || null,
+        size_description,
         price: values.price ?? 0,
         compare_at_price: values.compare_at_price ?? null,
         image_url: values.image_url?.trim() || null,
@@ -328,6 +349,11 @@ export default function ProductDetail() {
               </Descriptions.Item>
               <Descriptions.Item label="创建时间">{product.created_at || "—"}</Descriptions.Item>
               <Descriptions.Item label="更新时间">{product.updated_at || "—"}</Descriptions.Item>
+              {isStandalone ? (
+                <Descriptions.Item label="尺寸描述" span={2}>
+                  {formatSizeDescriptionForDisplay(product.size_description)}
+                </Descriptions.Item>
+              ) : null}
             </Descriptions>
           </div>
         </s-section>
@@ -442,6 +468,34 @@ export default function ProductDetail() {
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item label="尺寸（长 × 宽 × 高，单位 cm）">
+            <Space.Compact block style={{ width: "100%" }}>
+              <Form.Item
+                name="size_length_cm"
+                noStyle
+                dependencies={SIZE_CM_FORM_NAMES.filter((n) => n !== "size_length_cm")}
+                rules={SIZE_CM_GROUP_RULE}
+              >
+                <InputNumber min={0} step={0.1} placeholder="长" style={{ width: "33.33%" }} addonAfter="cm" />
+              </Form.Item>
+              <Form.Item
+                name="size_width_cm"
+                noStyle
+                dependencies={SIZE_CM_FORM_NAMES.filter((n) => n !== "size_width_cm")}
+                rules={SIZE_CM_GROUP_RULE}
+              >
+                <InputNumber min={0} step={0.1} placeholder="宽" style={{ width: "33.33%" }} addonAfter="cm" />
+              </Form.Item>
+              <Form.Item
+                name="size_height_cm"
+                noStyle
+                dependencies={SIZE_CM_FORM_NAMES.filter((n) => n !== "size_height_cm")}
+                rules={SIZE_CM_GROUP_RULE}
+              >
+                <InputNumber min={0} step={0.1} placeholder="高" style={{ width: "33.34%" }} addonAfter="cm" />
+              </Form.Item>
+            </Space.Compact>
           </Form.Item>
           <Form.Item name="price" label="售价" rules={[{ required: true }]}>
             <InputNumber min={0} step={0.01} style={{ width: "100%" }} />

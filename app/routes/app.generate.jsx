@@ -55,6 +55,7 @@ function normalizeProduct(raw) {
     id,
     title,
     body_html: bodyHtml,
+    size_description: raw.size_description ?? "",
     variants,
     images,
   };
@@ -269,6 +270,8 @@ export default function Generate() {
       return;
     }
 
+    const sizeDescription = String(selectedProduct.size_description || "").trim();
+
     const variantPayload = Array.isArray(selectedProduct.variants) && selectedProduct.variants.length > 1
       ? selectedProduct.variants
           .map((v) => {
@@ -310,6 +313,7 @@ export default function Generate() {
       product_id: productIdNum,
       name: selectedProduct.title || "",
       description: selectedProduct.body_html || "",
+      size_description: sizeDescription,
       price: toSafePrice(selectedProduct.variants?.[0]?.price),
       image_url: selectedProduct.images?.[0]?.src || "",
       inventory: Number.isFinite(Number(selectedProduct.inventory)) ? Number(selectedProduct.inventory) : 0,
