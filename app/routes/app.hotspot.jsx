@@ -4,7 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { Button, Space, Spin, Empty, message, Modal, InputNumber, Switch, Select } from "antd";
 import { authFetch } from "../utils/auth-api";
-
+ 
 const PAGE_SIZE = 10;
 const DEFAULT_MIN_COMPATIBILITY_SCORE = 60;
 const DEFAULT_SCHEDULE_STATE = {
@@ -21,6 +21,7 @@ const DEFAULT_SCHEDULE_STATE = {
   last_sent_at: null,
   last_triggered_at: null,
 };
+
 
 const SCHEDULE_MODE_OPTIONS = [
   { label: "从当前时刻开始按间隔触发（interval_from_now）", value: "interval_from_now" },
@@ -235,6 +236,7 @@ function HotspotItem({
             justifyContent: "center",
             gap: recommendationMode ? "0.45rem" : 0,
           }}
+          aria-hidden={!recommendationMode}
         >
           {recommendationMode ? (
             <span
@@ -243,14 +245,6 @@ function HotspotItem({
             >
               {matchScore}
             </span>
-          ) : null}
-          {!recommendationMode ? (
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={() => onToggleSelect(itemKey, item)}
-              aria-label={`选择热点：${item.title || "未命名热点"}`}
-            />
           ) : null}
         </div>
         <div className="hotspot-table-row__col hotspot-table-row__col--title">
@@ -742,7 +736,9 @@ export default function Hotspot() {
             }}
           >
             <span style={{ color: "var(--dash-muted)" }}>
-              已勾选 {Object.keys(selectedHotspots).length} 个热点
+              {recommendationMode
+                ? `已选择 ${Object.keys(selectedHotspots).length} 个热点`
+                : "未开启过滤，展示全部热点"}
             </span>
             <Space size="middle" wrap>
               <Button type={scheduleState.is_enabled ? "primary" : "default"} onClick={openScheduleModal} loading={scheduleLoading}>
@@ -752,7 +748,13 @@ export default function Hotspot() {
                 我的热点
               </Button>
               {recommendationMode ? (
-                <Button type="default" onClick={() => setRecommendationMode(false)}>
+                <Button
+                  type="default"
+                  onClick={() => {
+                    setRecommendationMode(false);
+                    setSelectedHotspots({});
+                  }}
+                >
                   取消过滤
                 </Button>
               ) : (
@@ -769,9 +771,11 @@ export default function Hotspot() {
                     : "恢复列表顺序"}
                 </Button>
               ) : null}
-              <Button type="primary" onClick={handleGenerate}>
-                基于所选热点生成营销内容
-              </Button>
+              {recommendationMode ? (
+                <Button type="primary" onClick={handleGenerate}>
+                  基于所选热点生成营销内容
+                </Button>
+              ) : null}
             </Space>
           </div>
           <p
@@ -810,7 +814,7 @@ export default function Hotspot() {
           {!loading && !error && hotspots.length > 0 && (
             <div className="hotspot-table">
               <div className="hotspot-table-header" role="row">
-                <span>{recommendationMode ? "匹配分" : "选择"}</span>
+                <span aria-hidden={!recommendationMode}>{recommendationMode ? "匹配分" : ""}</span>
                 <span>标题</span>
                 <span>摘要</span>
                 <span>平台与时间</span>
