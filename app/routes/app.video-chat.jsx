@@ -29,6 +29,7 @@ import {
   HistoryOutlined,
   GiftOutlined,
   InfoCircleOutlined,
+  QuestionCircleOutlined,
   CloseOutlined,
 } from "@ant-design/icons";
 
@@ -889,7 +890,14 @@ function formatThreadViewProgressBody(view) {
 function shouldSkipThreadProgressBubbleForView(view) {
   if (!view || typeof view !== "object") return true;
   const segs = view.segments;
-  if (view.status === "waiting_human" && Array.isArray(segs) && segs.length > 0) return true;
+  if (
+    view.status === "waiting_human" &&
+    view.review_phase !== "video" &&
+    Array.isArray(segs) &&
+    segs.length > 0
+  ) {
+    return true;
+  }
   return !formatThreadViewProgressBody(view).trim();
 }
 
@@ -1338,6 +1346,10 @@ export default function VideoChatPage() {
   const activeThreadId = threadBySession[activeSessionId] || "";
   const activeThreadView = threadViewBySession[activeSessionId] || null;
   const activeWaitingHuman = activeThreadView?.status === "waiting_human";
+  const activeVideoReview =
+    activeWaitingHuman &&
+    (activeThreadView?.review_phase === "video" || activeThreadView?.current_step === "waiting_human_vd");
+  const activeScriptReview = activeWaitingHuman && !activeVideoReview;
   const activeThreadRequesting = Boolean(threadRequestingBySession[activeSessionId]);
   const liveSegments = useMemo(
     () => (Array.isArray(activeThreadView?.segments) ? activeThreadView.segments : []),
@@ -1388,8 +1400,8 @@ export default function VideoChatPage() {
       taskResults.forEach((item) => {
         const sid = Number(item?.segment_id);
         const gid = Number(item?.generation_id);
-        if (!Number.isFinite(sid) || !Number.isFinite(gid)) return;
-        const url = generationStatusById[gid]?.video_url;
+        if (!Number.isFinite(sid)) return;
+        const url = (Number.isFinite(gid) ? generationStatusById[gid]?.video_url : "") || item?.video_url;
         if (url) map[sid] = url;
       });
     }
@@ -1402,12 +1414,58 @@ export default function VideoChatPage() {
     });
     return map;
   }, [activeGenerationToSegmentMap, activeThreadView?.task_results, generationStatusById]);
+  const activeSegmentErrorMap = useMemo(() => {
+    const map = {};
+    const taskResults = activeThreadView?.task_results;
+    if (Array.isArray(taskResults)) {
+      taskResults.forEach((item) => {
+        const sid = Number(item?.segment_id);
+        const gid = Number(item?.generation_id);
+        if (!Number.isFinite(sid)) return;
+        const fromTask = (item?.error_message || "").trim();
+        const fromWs = Number.isFinite(gid) ? (generationStatusById[gid]?.error_message || "").trim() : "";
+        const msg = fromWs || fromTask;
+        if (msg) map[sid] = msg;
+      });
+    }
+    Object.entries(activeGenerationToSegmentMap).forEach(([gidRaw, sidRaw]) => {
+      const gid = Number(gidRaw);
+      const sid = Number(sidRaw);
+      if (!Number.isFinite(gid) || !Number.isFinite(sid)) return;
+      const fromWs = (generationStatusById[gid]?.error_message || "").trim();
+      if (fromWs) map[sid] = fromWs;
+    });
+    return map;
+  }, [activeGenerationToSegmentMap, activeThreadView?.task_results, generationStatusById]);
+  const activeVideoResultMap = useMemo(() => {
+    const map = {};
+    const rows = Array.isArray(activeThreadView?.video_results)
+      ? activeThreadView.video_results
+      : Array.isArray(activeThreadView?.task_results)
+        ? activeThreadView.task_results
+        : [];
+    rows.forEach((item) => {
+      const sid = Number(item?.segment_id);
+      if (!Number.isFinite(sid)) return;
+      map[sid] = item;
+    });
+    return map;
+  }, [activeThreadView?.task_results, activeThreadView?.video_results]);
+  const activeAllSegmentIds = useMemo(
+    () =>
+      activeSegments
+        .map((seg) => Number(seg?.segment_id))
+        .filter((sid) => Number.isFinite(sid)),
+    [activeSegments],
+  );
   const activeProgressMessage =
     (typeof activeThreadView?.message === "string" && activeThreadView.message.trim()) || "暂无任务进度";
   const activeProgressValue = typeof activeThreadView?.progress === "number" ? `${activeThreadView.progress}%` : "--";
   const activeProgressStep = activeThreadView?.current_step || "-";
   const activeProgressStatus = activeThreadView?.status || "idle";
-  const inputPlaceholder = activeWaitingHuman
+  const inputPlaceholder = activeVideoReview
+    ? "请输入视频不满意的点，点击“反馈重写分镜”提交（Shift+Enter 换行）"
+    : activeScriptReview
     ? "请输入重写要求，点击“反馈重写”提交（Shift+Enter 换行）"
     : "发消息…（Shift+Enter 换行）";
 
@@ -1956,6 +2014,7 @@ export default function VideoChatPage() {
   const tryAppendSegmentsChat = useCallback(
     (sessionId, threadId, view) => {
       if (!threadId || !view || view.status !== "waiting_human") return;
+      if (view.review_phase === "video" || view.current_step === "waiting_human_vd") return;
       const segments = view.segments;
       if (!Array.isArray(segments) || segments.length === 0) return;
 
@@ -2213,11 +2272,12 @@ export default function VideoChatPage() {
           ...prevView,
           status: "finished",
           progress: 100,
-          message: data?.message || "视频生成任务已成功提交",
-          current_step: "done",
+          message: data?.message || "视频结果已确认",
+          current_step: data?.step || "finished",
+          review_phase: prevView.review_phase || "video",
         };
         threadViewBySessionRef.current[sessionId] = merged;
-        appendAssistantMessage(sessionId, "视频生成任务已提交完成。");
+        appendAssistantMessage(sessionId, data?.message || "视频结果已确认。");
         setThreadViewBySession((prev) => ({ ...prev, [sessionId]: merged }));
         void fetchThreadStateOnce(sessionId, threadId);
         closeThreadStream(sessionId);
@@ -2252,6 +2312,10 @@ export default function VideoChatPage() {
         tryAppendThreadViewProgressChat(sessionId, threadId, merged);
       });
 
+      es.addEventListener("done", (event) => {
+        handleStreamDone(parseEventData(event));
+      });
+
       const hydrateWaitingHumanFromPayload = (data) => {
         const prevView = threadViewBySessionRef.current[sessionId] || {};
         const mergedView = {
@@ -2279,6 +2343,81 @@ export default function VideoChatPage() {
 
       es.addEventListener("require_human_input", (event) => {
         hydrateWaitingHumanFromPayload(parseEventData(event));
+      });
+
+      const hydrateWaitingVideoResultsFromPayload = (data) => {
+        const prevView = threadViewBySessionRef.current[sessionId] || {};
+        const mergedView = {
+          ...prevView,
+          status: "running",
+          review_phase: "video_generating",
+          message: data?.message || "视频生成中，完成后将自动进入审阅阶段",
+          task_results: data?.task_results || prevView.task_results,
+          current_step: "waiting_video_results",
+          progress: prevView.progress ?? 98,
+        };
+        threadViewBySessionRef.current[sessionId] = mergedView;
+        setThreadViewBySession((prev) => ({ ...prev, [sessionId]: mergedView }));
+        tryAppendThreadViewProgressChat(sessionId, threadId, mergedView);
+      };
+
+      es.addEventListener("waiting_video_results", (event) => {
+        hydrateWaitingVideoResultsFromPayload(parseEventData(event));
+      });
+
+      const hydrateVideoReviewFromPayload = (data) => {
+        const prevView = threadViewBySessionRef.current[sessionId] || {};
+        const mergedView = {
+          ...prevView,
+          status: "waiting_human",
+          review_phase: "video",
+          message: data?.message || "请审阅视频生成结果",
+          video_results: data?.segments || prevView.video_results || [],
+          task_results: data?.task_results || prevView.task_results,
+          target_segment_ids: data?.target_segment_ids || prevView.target_segment_ids,
+          current_step: "waiting_human_vd",
+          progress: 100,
+        };
+        threadViewBySessionRef.current[sessionId] = mergedView;
+        setThreadViewBySession((prev) => ({ ...prev, [sessionId]: mergedView }));
+        tryAppendThreadViewProgressChat(sessionId, threadId, mergedView);
+      };
+
+      es.addEventListener("video_action_required", (event) => {
+        hydrateVideoReviewFromPayload(parseEventData(event));
+      });
+
+      es.addEventListener("video_result_updated", (event) => {
+        const data = parseEventData(event);
+        const generationId = Number(data?.generation_id);
+        if (Number.isFinite(generationId)) {
+          setGenerationStatusById((prev) => ({
+            ...prev,
+            [generationId]: {
+              ...(prev[generationId] || {}),
+              status: data?.status || prev[generationId]?.status || "",
+              video_url: data?.video_url || prev[generationId]?.video_url || "",
+              error_message: data?.error_message || prev[generationId]?.error_message || "",
+            },
+          }));
+          generationSessionRef.current[generationId] = sessionId;
+        }
+        const prevView = threadViewBySessionRef.current[sessionId] || {};
+        const taskResults = Array.isArray(prevView.task_results)
+          ? prevView.task_results.map((item) =>
+              item?.task_id === data?.task_id
+                ? {
+                    ...item,
+                    status: data?.status || item.status,
+                    video_url: data?.video_url || item.video_url,
+                    error_message: data?.error_message || item.error_message,
+                  }
+                : item,
+            )
+          : prevView.task_results;
+        const merged = { ...prevView, task_results: taskResults };
+        threadViewBySessionRef.current[sessionId] = merged;
+        setThreadViewBySession((prev) => ({ ...prev, [sessionId]: merged }));
       });
 
       es.addEventListener("segments_updated", (event) => {
@@ -2539,6 +2678,7 @@ export default function VideoChatPage() {
           action: "edit",
           edited_segments: [{ segment_id: sid, description: value, duration }],
           feedback: "",
+          target_segment_ids: activeVideoReview ? [sid] : [],
         });
       } finally {
         setSegmentSubmittingBySession((prev) => ({
@@ -2547,7 +2687,7 @@ export default function VideoChatPage() {
         }));
       }
     },
-    [activeSegmentDraftMap, activeSegmentDurationDraftMap, activeSessionId, resumeVideoThread],
+    [activeSegmentDraftMap, activeSegmentDurationDraftMap, activeSessionId, activeVideoReview, resumeVideoThread],
   );
 
   const handleSend = async () => {
@@ -2612,9 +2752,10 @@ export default function VideoChatPage() {
 
   const handleResumeApprove = async () => {
     await resumeVideoThread(activeSessionId, {
-      action: "approve",
+      action: activeVideoReview ? "finished" : "approve",
       edited_segments: [],
       feedback: "",
+      target_segment_ids: [],
     });
   };
 
@@ -2633,11 +2774,16 @@ export default function VideoChatPage() {
       action: "feedback",
       edited_segments: [],
       feedback: feedbackText,
+      target_segment_ids: activeVideoReview ? activeAllSegmentIds : [],
     });
     if (ok) setDraft("");
   };
 
   const handleResumeRegenerate = async () => {
+    if (activeVideoReview) {
+      await handleResumeVideoRegenerate(activeAllSegmentIds);
+      return;
+    }
     const feedbackText = draft.trim();
     if (!feedbackText) {
       antMessage.warning("请先在输入框填写重新生成要求");
@@ -2652,8 +2798,30 @@ export default function VideoChatPage() {
       action: "feedback",
       edited_segments: [],
       feedback: feedbackText,
+      target_segment_ids: [],
     });
     if (ok) setDraft("");
+  };
+
+  const handleResumeVideoRegenerate = async (segmentIds) => {
+    const ids = (Array.isArray(segmentIds) ? segmentIds : [])
+      .map((sid) => Number(sid))
+      .filter((sid) => Number.isFinite(sid));
+    if (!ids.length) {
+      antMessage.warning("请选择需要重生成的视频段");
+      return;
+    }
+    const sessionId = activeSessionId;
+    appendMessages(sessionId, (list) => [
+      ...list.map((m) => ({ ...m, suggestions: false })),
+      { id: uid(), role: "user", content: `按原分镜重生成视频段：${ids.join(", ")}` },
+    ]);
+    await resumeVideoThread(sessionId, {
+      action: "regenerate",
+      edited_segments: [],
+      feedback: "",
+      target_segment_ids: ids,
+    });
   };
 
   const handleResumeEdit = async () => {
@@ -2694,6 +2862,7 @@ export default function VideoChatPage() {
       action: "edit",
       edited_segments: editedSegments,
       feedback: "",
+      target_segment_ids: activeVideoReview ? editedSegments.map((seg) => seg.segment_id) : [],
     });
   };
 
@@ -2791,7 +2960,9 @@ export default function VideoChatPage() {
     activeSegments.length > 0 ? (
       <div className="video-chat-segment-panel">
         <div className="video-chat-segment-panel__head">
-          <div className="video-chat-segment-panel__title">分镜清单</div>
+          <div className="video-chat-segment-panel__title">
+            {activeVideoReview ? "视频结果审阅" : "分镜清单"}
+          </div>
           <div className="video-chat-segment-panel__summary">{activeSegments.length} 条</div>
         </div>
         <div className="video-chat-segment-list">
@@ -2802,7 +2973,10 @@ export default function VideoChatPage() {
               const sid = Number(seg?.segment_id);
               if (!Number.isFinite(sid)) return null;
               const meta = getSegmentStatusMeta(activeThreadView?.status, activeTaskStatusMap[sid]);
+              const videoResult = activeVideoResultMap[sid] || {};
               const segmentVideoUrl = activeSegmentVideoUrlMap[sid] || "";
+              const segmentError = (activeSegmentErrorMap[sid] || videoResult?.error_message || "").trim();
+              const taskStatus = activeTaskStatusMap[sid] || "";
               const draftValue = activeSegmentDraftMap[sid] ?? getSegmentDescriptionText(seg);
               const durationValue = resolveSegmentDurationDraft(sid, activeSegmentDurationDraftMap, seg);
               const durationTriggerDisabled = !activeWaitingHuman || activeThreadRequesting;
@@ -2810,10 +2984,24 @@ export default function VideoChatPage() {
                 <div key={sid} className="video-chat-segment-item">
                   <div className="video-chat-segment-item__top">
                     <div className="video-chat-segment-item__title">分镜 #{sid}</div>
-                    <span className={`video-chat-segment-item__status is-${meta.tone}`}>{meta.text}</span>
+                    <div className="video-chat-segment-item__status-wrap">
+                      <span className={`video-chat-segment-item__status is-${meta.tone}`}>{meta.text}</span>
+                      {taskStatus === "failed" ? (
+                        <Tooltip title={segmentError || "暂无原因"} placement="top">
+                          <span
+                            className={`video-chat-segment-item__fail-hint${segmentError ? "" : " is-unknown"}`}
+                            role="img"
+                            aria-label={segmentError ? `失败原因：${segmentError}` : "暂无失败原因"}
+                          >
+                            {segmentError ? <InfoCircleOutlined /> : <QuestionCircleOutlined />}
+                          </span>
+                        </Tooltip>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="video-chat-segment-item__meta">
                     {seg?.mode ? <span>{seg.mode}</span> : null}
+                    {activeVideoReview && videoResult?.task_id ? <span>task: {videoResult.task_id}</span> : null}
                     <div className="video-chat-segment-duration">
                       <span>时长</span>
                       <span className="video-chat-segment-duration__value" aria-live="polite">
@@ -2880,6 +3068,16 @@ export default function VideoChatPage() {
                     >
                       提交此分镜修改
                     </Button>
+                    {activeVideoReview && (
+                      <Button
+                        size="small"
+                        onClick={() => handleResumeVideoRegenerate([sid])}
+                        loading={activeThreadRequesting}
+                        disabled={activeThreadRequesting}
+                      >
+                        重生成此段
+                      </Button>
+                    )}
                     {segmentVideoUrl && (
                       <Button size="small" type="link" onClick={() => handleCopy(segmentVideoUrl)}>
                         复制视频链接
@@ -2893,13 +3091,13 @@ export default function VideoChatPage() {
         {activeWaitingHuman && (
           <div className="video-chat-segment-panel__actions">
             <Button size="small" type="primary" onClick={handleResumeApprove} loading={activeThreadRequesting}>
-              通过
+              {activeVideoReview ? "确认成片" : "通过"}
             </Button>
             <Button size="small" onClick={handleResumeEdit} loading={activeThreadRequesting}>
               提交修改
             </Button>
             <Button size="small" onClick={handleResumeRegenerate} loading={activeThreadRequesting}>
-              重新生成
+              {activeVideoReview ? "按原分镜重生成全部" : "重新生成"}
             </Button>
           </div>
         )}
