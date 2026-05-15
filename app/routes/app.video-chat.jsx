@@ -1233,6 +1233,7 @@ export default function VideoChatPage() {
   const [segmentBulkFieldEditBySession, setSegmentBulkFieldEditBySession] = useState(
     () => vcInit.segmentBulkFieldEditBySession || {},
   );
+  const [videoTailRegenerateSelectionBySession, setVideoTailRegenerateSelectionBySession] = useState({});
   const [historyListLoading, setHistoryListLoading] = useState(false);
   const scrollRef = useRef(null);
   const refFileInputRef = useRef(null);
@@ -1487,6 +1488,21 @@ export default function VideoChatPage() {
         .filter((sid) => Number.isFinite(sid)),
     [activeSegments],
   );
+  const activeSortedSegments = useMemo(
+    () =>
+      activeSegments
+        .slice()
+        .sort((a, b) => (Number(a?.segment_id) || 0) - (Number(b?.segment_id) || 0)),
+    [activeSegments],
+  );
+  const activeVideoTailSelection = videoTailRegenerateSelectionBySession[activeSessionId] || {};
+  const activeVideoTailSelecting = Boolean(activeVideoTailSelection.selecting);
+  const activeVideoTailStartId = Number(activeVideoTailSelection.selectedSegmentId);
+  const activeVideoTailStartIndex = activeSortedSegments.findIndex(
+    (seg) => Number(seg?.segment_id) === activeVideoTailStartId,
+  );
+  const activeVideoTailSelectedOrdinal =
+    activeVideoTailStartIndex >= 0 ? activeVideoTailStartIndex + 1 : null;
   const activeProgressMessage =
     (typeof activeThreadView?.message === "string" && activeThreadView.message.trim()) || "暂无任务进度";
   const activeProgressValue = typeof activeThreadView?.progress === "number" ? `${activeThreadView.progress}%` : "--";
@@ -1538,6 +1554,16 @@ export default function VideoChatPage() {
       [activeSessionId]: liveSegments,
     }));
   }, [activeSessionId, liveSegments]);
+
+  useEffect(() => {
+    if (activeVideoReview) return;
+    setVideoTailRegenerateSelectionBySession((prev) => {
+      if (!prev[activeSessionId]) return prev;
+      const next = { ...prev };
+      delete next[activeSessionId];
+      return next;
+    });
+  }, [activeSessionId, activeVideoReview]);
 
   useEffect(() => {
     const next = {};
@@ -2897,6 +2923,56 @@ export default function VideoChatPage() {
     if (ok) setDraft("");
   };
 
+  const updateVideoTailRegenerateSelection = (patch) => {
+    setVideoTailRegenerateSelectionBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: {
+        ...(prev[activeSessionId] || {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const clearVideoTailRegenerateSelection = () => {
+    setVideoTailRegenerateSelectionBySession((prev) => {
+      if (!prev[activeSessionId]) return prev;
+      const next = { ...prev };
+      delete next[activeSessionId];
+      return next;
+    });
+  };
+
+  const handleVideoTailSegmentSelect = (segmentId) => {
+    const sid = Number(segmentId);
+    if (activeVideoTailStartId === sid) {
+      clearVideoTailRegenerateSelection();
+      return;
+    }
+    updateVideoTailRegenerateSelection({
+      selecting: true,
+      selectedSegmentId: sid,
+    });
+    antMessage.info("再次点击该分镜可取消选中");
+  };
+
+  const handleVideoTailRegenerateButton = async () => {
+    if (!activeVideoReview) return;
+    if (!activeVideoTailSelecting) {
+      updateVideoTailRegenerateSelection({ selecting: true, selectedSegmentId: null });
+      return;
+    }
+    if (!Number.isFinite(activeVideoTailStartId) || activeVideoTailStartIndex < 0) {
+      clearVideoTailRegenerateSelection();
+      return;
+    }
+    const ids = activeSortedSegments
+      .slice(activeVideoTailStartIndex)
+      .map((seg) => Number(seg?.segment_id))
+      .filter((sid) => Number.isFinite(sid));
+    const ok = await handleResumeVideoRegenerate(ids, `从分镜 #${activeVideoTailStartId} 开始重生成后续视频段`);
+    if (ok) clearVideoTailRegenerateSelection();
+  };
+
   const handleResumeRegenerate = async () => {
     if (activeVideoReview) {
       await handleResumeVideoRegenerate(activeAllSegmentIds);
@@ -2921,20 +2997,20 @@ export default function VideoChatPage() {
     if (ok) setDraft("");
   };
 
-  const handleResumeVideoRegenerate = async (segmentIds) => {
+  const handleResumeVideoRegenerate = async (segmentIds, messagePrefix = "按原分镜重生成视频段") => {
     const ids = (Array.isArray(segmentIds) ? segmentIds : [])
       .map((sid) => Number(sid))
       .filter((sid) => Number.isFinite(sid));
     if (!ids.length) {
       antMessage.warning("请选择需要重生成的视频段");
-      return;
+      return false;
     }
     const sessionId = activeSessionId;
     appendMessages(sessionId, (list) => [
       ...list.map((m) => ({ ...m, suggestions: false })),
-      { id: uid(), role: "user", content: `按原分镜重生成视频段：${ids.join(", ")}` },
+      { id: uid(), role: "user", content: `${messagePrefix}：${ids.join(", ")}` },
     ]);
-    await resumeVideoThread(sessionId, {
+    return await resumeVideoThread(sessionId, {
       action: "regenerate",
       edited_segments: [],
       feedback: "",
@@ -3102,9 +3178,7 @@ export default function VideoChatPage() {
           <div className="video-chat-segment-panel__summary">{activeSegments.length} 条</div>
         </div>
         <div className="video-chat-segment-list">
-          {activeSegments
-            .slice()
-            .sort((a, b) => (Number(a?.segment_id) || 0) - (Number(b?.segment_id) || 0))
+          {activeSortedSegments
             .map((seg) => {
               const sid = Number(seg?.segment_id);
               if (!Number.isFinite(sid)) return null;
@@ -3122,7 +3196,21 @@ export default function VideoChatPage() {
               return (
                 <div key={sid} className="video-chat-segment-item">
                   <div className="video-chat-segment-item__top">
-                    <div className="video-chat-segment-item__title">分镜 #{sid}</div>
+                    <div className="video-chat-segment-item__title-wrap">
+                      {activeVideoReview && activeVideoTailSelecting ? (
+                        <input
+                          type="radio"
+                          className="video-chat-segment-item__tail-radio"
+                          name={`video-tail-regenerate-${activeSessionId}`}
+                          checked={activeVideoTailStartId === sid}
+                          onClick={() => handleVideoTailSegmentSelect(sid)}
+                          onChange={() => {}}
+                          disabled={activeThreadRequesting}
+                          aria-label={`选择从分镜 #${sid} 开始重生成后续视频`}
+                        />
+                      ) : null}
+                      <div className="video-chat-segment-item__title">分镜 #{sid}</div>
+                    </div>
                     <div className="video-chat-segment-item__status-wrap">
                       <span className={`video-chat-segment-item__status is-${meta.tone}`}>{meta.text}</span>
                       {taskStatus === "failed" ? (
@@ -3251,6 +3339,21 @@ export default function VideoChatPage() {
         </div>
         {activeWaitingHuman && (
           <div className="video-chat-segment-panel__actions">
+            {activeVideoReview ? (
+              <Button
+                size="small"
+                className="video-chat-segment-panel__tail-action"
+                onClick={handleVideoTailRegenerateButton}
+                loading={activeThreadRequesting}
+                disabled={activeThreadRequesting || activeSegmentBulkFieldEdit || !activeSortedSegments.length}
+              >
+                {!activeVideoTailSelecting
+                  ? "选择分镜并生成往后所有分镜"
+                  : activeVideoTailSelectedOrdinal
+                    ? `已选择第${activeVideoTailSelectedOrdinal}个分镜`
+                    : "取消选择"}
+              </Button>
+            ) : null}
             <Button size="small" type="primary" onClick={handleResumeApprove} loading={activeThreadRequesting}>
               {activeVideoReview ? "确认成片" : "通过"}
             </Button>
@@ -3277,7 +3380,7 @@ export default function VideoChatPage() {
               </>
             )}
             <Button size="small" onClick={handleResumeRegenerate} loading={activeThreadRequesting}>
-              {activeVideoReview ? "按原分镜重生成全部" : "重新生成"}
+              {activeVideoReview ? "按照当前分镜重新生成所有视频" : "重新生成"}
             </Button>
           </div>
         )}
