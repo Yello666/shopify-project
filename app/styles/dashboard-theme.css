@@ -543,6 +543,67 @@ body {
   color: #1d9a6c;
 }
 
+.hotspot-match-score-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  max-width: 100%;
+  cursor: help;
+}
+
+.hotspot-match-score__hint {
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--dash-muted);
+  line-height: 1;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.hotspot-radar-tooltip {
+  min-width: 13.5rem;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: inherit;
+}
+
+.hotspot-radar-tooltip__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.15rem 0;
+}
+
+.hotspot-radar-tooltip__row + .hotspot-radar-tooltip__row {
+  border-top: 1px solid rgba(128, 128, 128, 0.28);
+}
+
+.hotspot-radar-tooltip__label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  opacity: 0.88;
+}
+
+.hotspot-radar-tooltip__label-en {
+  font-size: 0.6875rem;
+  opacity: 0.72;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: 0.01em;
+}
+
+.hotspot-radar-tooltip__value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.hotspot-radar-tooltip__empty {
+  font-size: 0.8125rem;
+  opacity: 0.88;
+}
+
 .hotspot-table-row-extra--recommend {
   border-top: 1px dashed rgba(77, 105, 250, 0.18);
   padding-left: 1.25rem;
@@ -568,6 +629,95 @@ body {
 .hotspot-recommend-grid p {
   margin: 0;
   line-height: 1.45;
+}
+
+.hotspot-product-opportunities {
+  margin-top: 0.25rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed rgba(0, 0, 0, 0.08);
+}
+
+.hotspot-product-opportunities__title {
+  margin-bottom: 0.45rem;
+  font-weight: 600;
+  color: var(--dash-text);
+}
+
+.hotspot-product-opportunities__list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.hotspot-product-opportunity {
+  border: 1px solid rgba(77, 105, 250, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.6rem 0.7rem;
+}
+
+.hotspot-product-opportunity__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.hotspot-product-opportunity__header .hotspot-product-opportunity__name {
+  margin-bottom: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.hotspot-product-opportunity__toggle--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dash-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.hotspot-product-opportunity__toggle--icon:hover {
+  color: var(--dash-blue);
+  background: rgba(77, 105, 250, 0.08);
+}
+
+.hotspot-product-opportunity__toggle--icon:focus-visible {
+  outline: 2px solid var(--dash-blue);
+  outline-offset: 2px;
+}
+
+.hotspot-product-opportunity__toggle--icon .anticon {
+  font-size: 0.6875rem;
+  transition: transform 0.2s ease;
+}
+
+.hotspot-product-opportunity__toggle--icon.is-open .anticon {
+  transform: rotate(180deg);
+}
+
+.hotspot-product-opportunity__body {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px dashed rgba(0, 0, 0, 0.06);
+}
+
+.hotspot-product-opportunity__name {
+  margin-bottom: 0.35rem;
+  font-weight: 700;
+  color: var(--dash-blue);
+}
+
+.hotspot-product-opportunity p {
+  margin: 0.25rem 0 0;
+  line-height: 1.5;
 }
 
 .result-score {

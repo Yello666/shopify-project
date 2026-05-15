@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+/* eslint-disable react/prop-types */
 import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Button, Space, Spin, Empty, message, Modal, InputNumber, Switch, Select } from "antd";
+import { Button, Space, Spin, Empty, message, Modal, InputNumber, Switch, Select, Tooltip } from "antd";
+import { DownOutlined } from "@ant-design/icons";
 import { authFetch } from "../utils/auth-api";
  
 const PAGE_SIZE = 10;
@@ -128,6 +130,7 @@ function flattenRecommendedItem(raw) {
     recommend_reason: match?.reason ?? "",
     recommend_level: recommendationLabel || "",
     marketing_suggestion: match?.suggestion ?? "",
+    radar: match?.radar ?? trend?.radar ?? null,
   };
 }
 
@@ -141,6 +144,96 @@ function formatTags(tags) {
 function formatAudience(audience) {
   if (!Array.isArray(audience) || audience.length === 0) return "";
   return audience.join("、");
+}
+
+function normalizeProductOpportunities(item) {
+  const raw = item?.product_opportunities ?? item?.product_opportunity;
+  if (Array.isArray(raw)) return raw.filter((op) => op && typeof op === "object");
+  if (raw && typeof raw === "object") return [raw];
+  return [];
+}
+
+function productOpportunityRowKey(opportunity, idx) {
+  return `${opportunity?.product_name || "opportunity"}-${idx}`;
+}
+
+// eslint-disable-next-line react/prop-types
+function HotspotProductOpportunities({ opportunities }) {
+  const [expandedKeys, setExpandedKeys] = useState(() => new Set());
+
+  const toggle = useCallback((key) => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  if (!opportunities.length) return null;
+
+  return (
+    <div className="hotspot-product-opportunities">
+      <div className="hotspot-product-opportunities__title">商品机会</div>
+      <div className="hotspot-product-opportunities__list">
+        {opportunities.map((opportunity, idx) => {
+          const sellingPoints = Array.isArray(opportunity?.selling_points)
+            ? opportunity.selling_points.filter(Boolean).map(String)
+            : [];
+          const rowKey = productOpportunityRowKey(opportunity, idx);
+          const isOpen = expandedKeys.has(rowKey);
+          const label = opportunity?.product_name || `商品机会 ${idx + 1}`;
+
+          return (
+            <div className="hotspot-product-opportunity" key={rowKey}>
+              <div className="hotspot-product-opportunity__header">
+                <span className="hotspot-product-opportunity__name">{label}</span>
+                <button
+                  type="button"
+                  className={`hotspot-product-opportunity__toggle hotspot-product-opportunity__toggle--icon${
+                    isOpen ? " is-open" : ""
+                  }`}
+                  onClick={() => toggle(rowKey)}
+                  aria-expanded={isOpen}
+                  aria-label={isOpen ? `收起「${label}」详情` : `展开「${label}」详情`}
+                >
+                  <DownOutlined aria-hidden />
+                </button>
+              </div>
+              {isOpen ? (
+                <div className="hotspot-product-opportunity__body">
+                  {opportunity?.reason ? (
+                    <p>
+                      <strong>适合原因：</strong>
+                      {opportunity.reason}
+                    </p>
+                  ) : null}
+                  {opportunity?.target_audience ? (
+                    <p>
+                      <strong>目标人群：</strong>
+                      {opportunity.target_audience}
+                    </p>
+                  ) : null}
+                  {opportunity?.production_difficulty ? (
+                    <p>
+                      <strong>制作难度：</strong>
+                      {opportunity.production_difficulty}
+                    </p>
+                  ) : null}
+                  {sellingPoints.length ? (
+                    <p>
+                      <strong>卖点：</strong>
+                      {sellingPoints.join("、")}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // 从行数据解析契合度/匹配分数值，供排序与匹配分颜色分档使用；无效时返回 null
@@ -160,6 +253,42 @@ function matchScoreToneClass(score) {
   if (score < 60) return "hotspot-match-score--mid";
   if (score < 80) return "hotspot-match-score--good";
   return "hotspot-match-score--high";
+}
+
+const MATCH_RADAR_KEYS = [
+  { key: "business_relevance", label: "业务相关度" },
+  { key: "audience_overlap", label: "受众重合" },
+  { key: "brand_voice_fit", label: "品牌调性契合" },
+  { key: "marketing_risk", label: "营销风险" },
+];
+
+function formatRadarMetric(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value.trim());
+    if (Number.isFinite(n)) return String(n);
+    return value.trim();
+  }
+  return "—";
+}
+
+function renderMatchRadarTooltipTitle(radar) {
+  if (!radar || typeof radar !== "object") {
+    return <span className="hotspot-radar-tooltip__empty">暂无雷达细分数据</span>;
+  }
+  return (
+    <div className="hotspot-radar-tooltip">
+      {MATCH_RADAR_KEYS.map(({ key, label }) => (
+        <div key={key} className="hotspot-radar-tooltip__row">
+          <span className="hotspot-radar-tooltip__label">
+            {label}
+            <span className="hotspot-radar-tooltip__label-en">{key}</span>
+          </span>
+          <span className="hotspot-radar-tooltip__value">{formatRadarMetric(radar[key])}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // 生成列表行的 React key，排序后保持不变；优先 id，避免勾选状态错乱
@@ -201,6 +330,8 @@ function HotspotItem({
     typeof item.marketing_suggestion === "string" && item.marketing_suggestion.trim()
       ? item.marketing_suggestion.trim()
       : "—";
+  const productOpportunities = normalizeProductOpportunities(item);
+  const radar = item.radar && typeof item.radar === "object" ? item.radar : null;
   const viewsLikes = [
     item.view_count != null ? `${item.view_count} 浏览` : null,
     item.likes != null ? `${item.likes} 赞` : null,
@@ -216,9 +347,17 @@ function HotspotItem({
 
   const warningLine = typeof item.warning_message === "string" ? item.warning_message.trim() : "";
   const hasSentimentScore = item.sentiment_score != null && item.sentiment_score !== 0;
+  const sentimentLabelText =
+    typeof item.sentiment_label === "string" ? item.sentiment_label.trim() : "";
+  const hasSentimentLabel = Boolean(sentimentLabelText);
   const audienceLine = audienceStr ? `受众：${audienceStr}` : "";
   const showOriginalLink = Boolean(item.jump_url) && !hideOriginalLink;
-  const hasExtra = Boolean(warningLine) || Boolean(audienceLine) || hasSentimentScore || showOriginalLink;
+  const hasExtra =
+    Boolean(warningLine) ||
+    Boolean(audienceLine) ||
+    hasSentimentScore ||
+    hasSentimentLabel ||
+    showOriginalLink;
 
   return (
     <div className="hotspot-table-body-group">
@@ -229,7 +368,7 @@ function HotspotItem({
         <div
           className="hotspot-table-row__select-cell"
           style={{
-            width: "28px",
+            width: recommendationMode ? "100%" : "28px",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
@@ -239,12 +378,21 @@ function HotspotItem({
           aria-hidden={!recommendationMode}
         >
           {recommendationMode ? (
-            <span
-              className={`hotspot-match-score ${scoreToneClass}`}
-              aria-label={`匹配分数 ${matchScore}`}
+            <Tooltip
+              title={renderMatchRadarTooltipTitle(radar)}
+              placement="left"
+              mouseEnterDelay={0.08}
             >
-              {matchScore}
-            </span>
+              <span
+                className="hotspot-match-score-wrap"
+                aria-label={`匹配分数 ${matchScore}，悬停查看雷达细分`}
+              >
+                <span className={`hotspot-match-score ${scoreToneClass}`}>{matchScore}</span>
+                <span className="hotspot-match-score__hint" aria-hidden="true">
+                  ?
+                </span>
+              </span>
+            </Tooltip>
           ) : null}
         </div>
         <div className="hotspot-table-row__col hotspot-table-row__col--title">
@@ -265,9 +413,6 @@ function HotspotItem({
         <div className="hotspot-table-row__col hotspot-table-row__col--meta">
           <span>{item.platform || "—"}</span>
           <span className="hotspot-table-row__sub">{item.publish_time || "—"}</span>
-          {item.sentiment_label ? (
-            <span className="hotspot-table-row__sub">{item.sentiment_label}</span>
-          ) : null}
         </div>
         <div className="hotspot-table-row__col hotspot-table-row__col--action">
           <span className="hotspot-table-row__text">{viewsLikes || "—"}</span>
@@ -301,6 +446,7 @@ function HotspotItem({
                 <strong>营销建议：</strong>
                 {marketingSuggestion}
               </p>
+              <HotspotProductOpportunities opportunities={productOpportunities} />
             </div>
           </div>
         </div>
@@ -311,7 +457,7 @@ function HotspotItem({
             index % 2 === 1 ? "hotspot-table-row--alt" : ""
           }`}
         >
-          {warningLine ? <div>{warningLine}</div> : null}
+          {warningLine ? <div>风险提示：{warningLine}</div> : null}
           {audienceLine ? <div style={{ marginTop: warningLine ? "0.35rem" : 0 }}>{audienceLine}</div> : null}
           {hasSentimentScore ? (
             <div style={{ marginTop: warningLine || audienceLine ? "0.35rem" : 0 }}>
@@ -346,8 +492,22 @@ function HotspotItem({
               ) : null}
             </div>
           ) : null}
+          {hasSentimentLabel ? (
+            <div
+              style={{
+                marginTop: hasSentimentScore ? "0.35rem" : warningLine || audienceLine ? "0.35rem" : 0,
+              }}
+            >
+              情感标签：{sentimentLabelText}
+            </div>
+          ) : null}
           {showOriginalLink ? (
-            <div style={{ marginTop: warningLine || audienceLine || hasSentimentScore ? "0.35rem" : 0 }}>
+            <div
+              style={{
+                marginTop:
+                  warningLine || audienceLine || hasSentimentScore || hasSentimentLabel ? "0.35rem" : 0,
+              }}
+            >
               <a href={item.jump_url} target="_blank" rel="noopener noreferrer">
                 查看原文链接
               </a>
