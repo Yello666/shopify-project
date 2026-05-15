@@ -31,6 +31,7 @@ import {
   InfoCircleOutlined,
   QuestionCircleOutlined,
   CloseOutlined,
+  EditOutlined,
 } from "@ant-design/icons";
 
 const EMPTY_MESSAGES = [];
@@ -1235,6 +1236,9 @@ export default function VideoChatPage() {
   );
   const [videoTailRegenerateSelectionBySession, setVideoTailRegenerateSelectionBySession] = useState({});
   const [historyListLoading, setHistoryListLoading] = useState(false);
+  const [historyTitleEditingSessionId, setHistoryTitleEditingSessionId] = useState("");
+  const [historyTitleDraft, setHistoryTitleDraft] = useState("");
+  const [historyTitleSavingSessionId, setHistoryTitleSavingSessionId] = useState("");
   const scrollRef = useRef(null);
   const refFileInputRef = useRef(null);
   const wsRef = useRef(null);
@@ -2662,6 +2666,8 @@ export default function VideoChatPage() {
     (id) => {
       if (id === activeSessionId) return;
       const prevId = activeSessionIdRef.current;
+      setHistoryTitleEditingSessionId("");
+      setHistoryTitleDraft("");
       setActiveSessionId(id);
       setDraft("");
       setParamModalOpen(false);
@@ -2690,6 +2696,75 @@ export default function VideoChatPage() {
     },
     [activeSessionId, closeThreadStream, fetchThreadHistoryOnce, fetchThreadStateOnce, startThreadStream],
   );
+
+  const startHistoryTitleEdit = (session) => {
+    const threadId = threadBySession[session.id] || threadIdFromServerSessionId(session.id);
+    if (!threadId) {
+      antMessage.warning("该会话还没有生成历史记录，暂不能重命名");
+      return;
+    }
+    setHistoryTitleEditingSessionId(session.id);
+    setHistoryTitleDraft(String(session.title || "").slice(0, 20));
+  };
+
+  const cancelHistoryTitleEdit = () => {
+    setHistoryTitleEditingSessionId("");
+    setHistoryTitleDraft("");
+  };
+
+  const saveHistoryTitleEdit = async (session) => {
+    const threadId = threadBySession[session.id] || threadIdFromServerSessionId(session.id);
+    if (!threadId) {
+      antMessage.warning("该会话还没有生成历史记录，暂不能重命名");
+      return;
+    }
+    const nextTitle = historyTitleDraft.trim();
+    if (!nextTitle) {
+      antMessage.warning("历史记录名字不能为空");
+      return;
+    }
+    if (nextTitle.length > 20) {
+      antMessage.warning("历史记录名字最多 20 个字符");
+      return;
+    }
+    setHistoryTitleSavingSessionId(session.id);
+    try {
+      const res = await authFetch(`${VIDEO_THREAD_API_BASE}/${encodeURIComponent(threadId)}/title`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: nextTitle }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || (json?.code != null && Number(json.code) !== 0)) {
+        throw new Error(json?.detail || json?.message || "修改历史记录名字失败");
+      }
+      const savedTitle = String(json?.data?.title || nextTitle).trim() || nextTitle;
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === session.id
+            ? {
+                ...s,
+                title: savedTitle,
+                updatedAt: Date.now(),
+              }
+            : s,
+        ),
+      );
+      setHistoryTitleEditingSessionId("");
+      setHistoryTitleDraft("");
+      antMessage.success("历史记录名字已更新");
+      void fetchVideoThreadList();
+    } catch (e) {
+      const errorText = e instanceof Error ? e.message : "修改历史记录名字失败";
+      if (e instanceof Error && ["AUTH_REQUIRED", "AUTH_EXPIRED"].includes(e.message)) {
+        antMessage.warning("登录已过期，请返回首页重新登录");
+      } else {
+        antMessage.error(errorText);
+      }
+    } finally {
+      setHistoryTitleSavingSessionId("");
+    }
+  };
 
   useEffect(() => {
     if (authChecking) return;
@@ -3452,23 +3527,65 @@ export default function VideoChatPage() {
             <ul className="video-chat-history-list">
               {historyItems.map((s) => {
                 const initial = (s.title && s.title.trim().charAt(0)) || "·";
+                const threadId = threadBySession[s.id] || threadIdFromServerSessionId(s.id);
+                const editingTitle = historyTitleEditingSessionId === s.id;
                 return (
                   <li key={s.id}>
-                    <button
-                      type="button"
-                      className={`video-chat-history-item ${s.id === activeSessionId ? "is-active" : ""}`}
-                      onClick={() => handleSelectSession(s.id)}
-                      title={s.title}
-                      aria-current={s.id === activeSessionId ? "true" : undefined}
-                    >
-                      {sidebarExpanded ? (
-                        <span className="video-chat-history-text">{s.title}</span>
-                      ) : (
-                        <span className="video-chat-history-compact" aria-hidden>
-                          {initial}
-                        </span>
-                      )}
-                    </button>
+                    {sidebarExpanded && editingTitle ? (
+                      <div className="video-chat-history-edit-row">
+                        <Input
+                          size="small"
+                          value={historyTitleDraft}
+                          maxLength={20}
+                          onChange={(e) => setHistoryTitleDraft(e.target.value)}
+                          onPressEnter={() => void saveHistoryTitleEdit(s)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") cancelHistoryTitleEdit();
+                          }}
+                          placeholder="历史记录名字"
+                        />
+                        <Button
+                          size="small"
+                          type="primary"
+                          loading={historyTitleSavingSessionId === s.id}
+                          onClick={() => void saveHistoryTitleEdit(s)}
+                        >
+                          保存
+                        </Button>
+                        <Button size="small" onClick={cancelHistoryTitleEdit}>
+                          取消
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="video-chat-history-row">
+                        <button
+                          type="button"
+                          className={`video-chat-history-item ${s.id === activeSessionId ? "is-active" : ""}`}
+                          onClick={() => handleSelectSession(s.id)}
+                          title={s.title}
+                          aria-current={s.id === activeSessionId ? "true" : undefined}
+                        >
+                          {sidebarExpanded ? (
+                            <span className="video-chat-history-text">{s.title}</span>
+                          ) : (
+                            <span className="video-chat-history-compact" aria-hidden>
+                              {initial}
+                            </span>
+                          )}
+                        </button>
+                        {sidebarExpanded && threadId ? (
+                          <Button
+                            type="text"
+                            size="small"
+                            className="video-chat-history-rename-btn"
+                            icon={<EditOutlined />}
+                            aria-label={`重命名 ${s.title}`}
+                            title="重命名"
+                            onClick={() => startHistoryTitleEdit(s)}
+                          />
+                        ) : null}
+                      </div>
+                    )}
                   </li>
                 );
               })}

@@ -170,8 +170,16 @@
   flex: 1;
 }
 
+.video-chat-history-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .video-chat-history-item {
   width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   border: none;
   background: transparent;
@@ -183,6 +191,26 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.video-chat-history-rename-btn {
+  flex-shrink: 0;
+  color: #7f879c;
+}
+
+.video-chat-history-rename-btn:hover {
+  color: var(--dash-blue);
+}
+
+.video-chat-history-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.25rem 0;
+}
+
+.video-chat-history-edit-row .ant-input {
+  min-width: 0;
 }
 
 .video-chat-history-item:hover {
