@@ -594,6 +594,10 @@ function buildDemoInitialState() {
     segmentDraftBySession: {},
     segmentDurationDraftBySession: {},
     segmentSubmittingBySession: {},
+    /** 会话内各分镜是否处于「单条字段编辑」态（不落快照，刷新即清） */
+    segmentFieldEditBySession: {},
+    /** 会话内是否处于「一次性编辑全部分镜」态 */
+    segmentBulkFieldEditBySession: {},
   };
 }
 
@@ -702,6 +706,8 @@ function hydrateFromSnapshotPayload(data) {
         ? data.segmentDurationDraftBySession
         : {},
     segmentSubmittingBySession: {},
+    segmentFieldEditBySession: {},
+    segmentBulkFieldEditBySession: {},
   };
 }
 
@@ -1221,6 +1227,12 @@ export default function VideoChatPage() {
   const [segmentSubmittingBySession, setSegmentSubmittingBySession] = useState(
     () => vcInit.segmentSubmittingBySession,
   );
+  const [segmentFieldEditBySession, setSegmentFieldEditBySession] = useState(
+    () => vcInit.segmentFieldEditBySession || {},
+  );
+  const [segmentBulkFieldEditBySession, setSegmentBulkFieldEditBySession] = useState(
+    () => vcInit.segmentBulkFieldEditBySession || {},
+  );
   const [historyListLoading, setHistoryListLoading] = useState(false);
   const scrollRef = useRef(null);
   const refFileInputRef = useRef(null);
@@ -1367,7 +1379,24 @@ export default function VideoChatPage() {
     () => segmentDurationDraftBySession[activeSessionId] || {},
     [activeSessionId, segmentDurationDraftBySession],
   );
+  const segmentBulkDirtyStats = useMemo(() => {
+    if (!activeSegments.length) return { modifiedCount: 0, totalCount: 0 };
+    let modified = 0;
+    for (const seg of activeSegments) {
+      const sid = Number(seg?.segment_id);
+      if (!Number.isFinite(sid)) continue;
+      const originalText = getSegmentDescriptionText(seg);
+      const draftText = String(activeSegmentDraftMap[sid] ?? originalText).trim();
+      const draftDuration = resolveSegmentDurationDraft(sid, activeSegmentDurationDraftMap, seg);
+      const originalDuration = coerceSegmentDurationFromBackend(seg?.duration);
+      if (draftText !== originalText || draftDuration !== originalDuration) modified += 1;
+    }
+    return { modifiedCount: modified, totalCount: activeSegments.length };
+  }, [activeSegmentDraftMap, activeSegmentDurationDraftMap, activeSegments]);
+
   const activeSegmentSubmittingMap = segmentSubmittingBySession[activeSessionId] || {};
+  const activeSegmentFieldEditMap = segmentFieldEditBySession[activeSessionId] || {};
+  const activeSegmentBulkFieldEdit = Boolean(segmentBulkFieldEditBySession[activeSessionId]);
   const activeGenerationToSegmentMap = useMemo(
     () => generationToSegmentBySession[activeSessionId] || {},
     [activeSessionId, generationToSegmentBySession],
@@ -1579,6 +1608,14 @@ export default function VideoChatPage() {
           return [sid, coerceSegmentDurationFromBackend(seg?.duration)];
         }),
       ),
+    }));
+    setSegmentFieldEditBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: {},
+    }));
+    setSegmentBulkFieldEditBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: false,
     }));
   }, [activeSegments, activeSessionId]);
 
@@ -2074,6 +2111,74 @@ export default function VideoChatPage() {
       },
     }));
   }, [activeSessionId]);
+
+  const startSegmentInlineFieldEdit = useCallback((segmentId) => {
+    setSegmentBulkFieldEditBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: false,
+    }));
+    setSegmentFieldEditBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: { ...(prev[activeSessionId] || {}), [segmentId]: true },
+    }));
+  }, [activeSessionId]);
+
+  const cancelSegmentInlineFieldEdit = useCallback((segment) => {
+    const sid = Number(segment?.segment_id);
+    if (!Number.isFinite(sid)) return;
+    const originalText = getSegmentDescriptionText(segment);
+    const originalDuration = coerceSegmentDurationFromBackend(segment?.duration);
+    setSegmentDraftBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: { ...(prev[activeSessionId] || {}), [sid]: originalText },
+    }));
+    setSegmentDurationDraftBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: { ...(prev[activeSessionId] || {}), [sid]: originalDuration },
+    }));
+    setSegmentFieldEditBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: { ...(prev[activeSessionId] || {}), [sid]: false },
+    }));
+  }, [activeSessionId]);
+
+  const startBulkSegmentFieldEdit = useCallback(() => {
+    setSegmentFieldEditBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: {},
+    }));
+    setSegmentBulkFieldEditBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: true,
+    }));
+  }, [activeSessionId]);
+
+  const cancelBulkSegmentFieldEdit = useCallback(() => {
+    setSegmentDraftBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: Object.fromEntries(
+        activeSegments
+          .filter((s) => Number.isFinite(Number(s?.segment_id)))
+          .map((s) => [Number(s.segment_id), getSegmentDescriptionText(s)]),
+      ),
+    }));
+    setSegmentDurationDraftBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: Object.fromEntries(
+        activeSegments
+          .filter((s) => Number.isFinite(Number(s?.segment_id)))
+          .map((s) => [Number(s.segment_id), coerceSegmentDurationFromBackend(s?.duration)]),
+      ),
+    }));
+    setSegmentFieldEditBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: {},
+    }));
+    setSegmentBulkFieldEditBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: false,
+    }));
+  }, [activeSessionId, activeSegments]);
 
   const handleRefFilesChange = useCallback(async (e) => {
     const rawFiles = Array.from(e.target.files || []);
@@ -2658,28 +2763,35 @@ export default function VideoChatPage() {
   const handleSubmitSingleSegmentEdit = useCallback(
     async (segment) => {
       const sid = Number(segment?.segment_id);
-      if (!Number.isFinite(sid)) return;
+      if (!Number.isFinite(sid)) return false;
       const value = (activeSegmentDraftMap[sid] ?? "").trim();
       if (!value) {
         antMessage.warning(`分镜 #${sid} 的描述不能为空`);
-        return;
+        return false;
       }
       const duration = resolveSegmentDurationDraft(sid, activeSegmentDurationDraftMap, segment);
       if (!isAllowedSegmentDuration(duration)) {
         antMessage.warning(`分镜 #${sid} 的时长须为 4–15 秒或「模型自主选择」(-1)`);
-        return;
+        return false;
       }
       setSegmentSubmittingBySession((prev) => ({
         ...prev,
         [activeSessionId]: { ...(prev[activeSessionId] || {}), [sid]: true },
       }));
       try {
-        await resumeVideoThread(activeSessionId, {
+        const ok = await resumeVideoThread(activeSessionId, {
           action: "edit",
           edited_segments: [{ segment_id: sid, description: value, duration }],
           feedback: "",
           target_segment_ids: activeVideoReview ? [sid] : [],
         });
+        if (ok) {
+          setSegmentFieldEditBySession((prev) => ({
+            ...prev,
+            [activeSessionId]: { ...(prev[activeSessionId] || {}), [sid]: false },
+          }));
+        }
+        return ok;
       } finally {
         setSegmentSubmittingBySession((prev) => ({
           ...prev,
@@ -2687,7 +2799,13 @@ export default function VideoChatPage() {
         }));
       }
     },
-    [activeSegmentDraftMap, activeSegmentDurationDraftMap, activeSessionId, activeVideoReview, resumeVideoThread],
+    [
+      activeSegmentDraftMap,
+      activeSegmentDurationDraftMap,
+      activeSessionId,
+      activeVideoReview,
+      resumeVideoThread,
+    ],
   );
 
   const handleSend = async () => {
@@ -2824,11 +2942,11 @@ export default function VideoChatPage() {
     });
   };
 
-  const handleResumeEdit = async () => {
+  const handleResumeEdit = useCallback(async () => {
     const segments = activeThreadView?.segments || [];
     if (!segments.length) {
       antMessage.warning("当前没有可编辑的分镜");
-      return;
+      return false;
     }
     const editedSegments = [];
     for (const seg of segments) {
@@ -2838,12 +2956,12 @@ export default function VideoChatPage() {
       const draftText = (activeSegmentDraftMap[sid] ?? "").trim();
       if (!draftText) {
         antMessage.warning(`分镜 #${sid} 的描述不能为空`);
-        return;
+        return false;
       }
       const draftDuration = resolveSegmentDurationDraft(sid, activeSegmentDurationDraftMap, seg);
       if (!isAllowedSegmentDuration(draftDuration)) {
         antMessage.warning(`分镜 #${sid} 的时长须为 4–15 秒或「模型自主选择」(-1)`);
-        return;
+        return false;
       }
       const originalCoerced = coerceSegmentDurationFromBackend(seg?.duration);
       const durationChanged = draftDuration !== originalCoerced;
@@ -2856,15 +2974,33 @@ export default function VideoChatPage() {
     }
     if (!editedSegments.length) {
       antMessage.info("请先在分镜清单里修改至少一条分镜内容或时长");
-      return;
+      return false;
     }
-    await resumeVideoThread(activeSessionId, {
+    const ok = await resumeVideoThread(activeSessionId, {
       action: "edit",
       edited_segments: editedSegments,
       feedback: "",
-      target_segment_ids: activeVideoReview ? editedSegments.map((seg) => seg.segment_id) : [],
+      target_segment_ids: activeVideoReview ? editedSegments.map((s) => s.segment_id) : [],
     });
-  };
+    if (ok) {
+      setSegmentBulkFieldEditBySession((prev) => ({
+        ...prev,
+        [activeSessionId]: false,
+      }));
+      setSegmentFieldEditBySession((prev) => ({
+        ...prev,
+        [activeSessionId]: {},
+      }));
+    }
+    return ok;
+  }, [
+    activeSessionId,
+    activeSegmentDraftMap,
+    activeSegmentDurationDraftMap,
+    activeThreadView?.segments,
+    activeVideoReview,
+    resumeVideoThread,
+  ]);
 
   /** 页面刷新后，自动重连 snapshot 中未完成线程的 SSE 流并拉取最新状态 */
   const snapshotReconnectedRef = useRef(false);
@@ -2979,7 +3115,10 @@ export default function VideoChatPage() {
               const taskStatus = activeTaskStatusMap[sid] || "";
               const draftValue = activeSegmentDraftMap[sid] ?? getSegmentDescriptionText(seg);
               const durationValue = resolveSegmentDurationDraft(sid, activeSegmentDurationDraftMap, seg);
-              const durationTriggerDisabled = !activeWaitingHuman || activeThreadRequesting;
+              const segmentFieldEditing = Boolean(activeSegmentFieldEditMap[sid]);
+              const segmentFieldEditable = segmentFieldEditing || activeSegmentBulkFieldEdit;
+              const segmentControlsDisabled = !activeWaitingHuman || activeThreadRequesting;
+              const durationTriggerDisabled = segmentControlsDisabled || !segmentFieldEditable;
               return (
                 <div key={sid} className="video-chat-segment-item">
                   <div className="video-chat-segment-item__top">
@@ -3051,22 +3190,44 @@ export default function VideoChatPage() {
                       </Dropdown>
                     </div>
                   </div>
-                  <Input.TextArea
-                    value={draftValue}
-                    autoSize={{ minRows: 2, maxRows: 4 }}
-                    className="video-chat-segment-item__textarea"
-                    disabled={!activeWaitingHuman || activeThreadRequesting}
-                    onChange={(e) => handleSegmentDraftChange(sid, e.target.value)}
-                    placeholder="输入该分镜描述"
-                  />
+                  <div className="video-chat-segment-item__field-row">
+                    <div
+                      className={`video-chat-segment-item__textarea-wrap${
+                        !segmentControlsDisabled && !segmentFieldEditable
+                          ? " video-chat-segment-item__textarea-wrap--locked"
+                          : ""
+                      }`}
+                    >
+                      <Input.TextArea
+                        value={draftValue}
+                        autoSize={{ minRows: 2, maxRows: 4 }}
+                        className="video-chat-segment-item__textarea"
+                        disabled={segmentControlsDisabled}
+                        readOnly={!segmentControlsDisabled && !segmentFieldEditable}
+                        onChange={(e) => handleSegmentDraftChange(sid, e.target.value)}
+                        placeholder="输入该分镜描述"
+                      />
+                    </div>
+                    {segmentFieldEditing && !segmentControlsDisabled && !activeSegmentBulkFieldEdit ? (
+                      <div className="video-chat-segment-item__field-aside">
+                        <Button type="link" size="small" onClick={() => cancelSegmentInlineFieldEdit(seg)}>
+                          取消修改
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
                   <div className="video-chat-segment-item__actions">
                     <Button
                       size="small"
-                      onClick={() => handleSubmitSingleSegmentEdit(seg)}
+                      onClick={() =>
+                        segmentFieldEditing
+                          ? void handleSubmitSingleSegmentEdit(seg)
+                          : startSegmentInlineFieldEdit(sid)
+                      }
                       loading={Boolean(activeSegmentSubmittingMap[sid])}
-                      disabled={!activeWaitingHuman || activeThreadRequesting}
+                      disabled={segmentControlsDisabled || activeSegmentBulkFieldEdit}
                     >
-                      提交此分镜修改
+                      {segmentFieldEditing ? "确认修改" : "修改此分镜"}
                     </Button>
                     {activeVideoReview && (
                       <Button
@@ -3075,7 +3236,7 @@ export default function VideoChatPage() {
                         loading={activeThreadRequesting}
                         disabled={activeThreadRequesting}
                       >
-                        重生成此段
+                        重新生成该分镜视频
                       </Button>
                     )}
                     {segmentVideoUrl && (
@@ -3093,9 +3254,28 @@ export default function VideoChatPage() {
             <Button size="small" type="primary" onClick={handleResumeApprove} loading={activeThreadRequesting}>
               {activeVideoReview ? "确认成片" : "通过"}
             </Button>
-            <Button size="small" onClick={handleResumeEdit} loading={activeThreadRequesting}>
-              提交修改
-            </Button>
+            {!activeSegmentBulkFieldEdit ? (
+              <Button
+                size="small"
+                onClick={startBulkSegmentFieldEdit}
+                disabled={activeThreadRequesting}
+              >
+                修改全部分镜
+              </Button>
+            ) : (
+              <>
+                <Button
+                  size="small"
+                  onClick={() => void handleResumeEdit()}
+                  loading={activeThreadRequesting}
+                >
+                  {`保存修改 ${segmentBulkDirtyStats.modifiedCount}/${segmentBulkDirtyStats.totalCount}`}
+                </Button>
+                <Button size="small" onClick={cancelBulkSegmentFieldEdit} disabled={activeThreadRequesting}>
+                  {`取消修改 ${segmentBulkDirtyStats.modifiedCount}/${segmentBulkDirtyStats.totalCount}`}
+                </Button>
+              </>
+            )}
             <Button size="small" onClick={handleResumeRegenerate} loading={activeThreadRequesting}>
               {activeVideoReview ? "按原分镜重生成全部" : "重新生成"}
             </Button>
