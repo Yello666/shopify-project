@@ -352,6 +352,11 @@ body {
   text-align: left;
 }
 
+.tiktok-hotspot-table .hotspot-table-header,
+.tiktok-hotspot-table .hotspot-table-row {
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.8fr) minmax(0, 0.85fr) minmax(0, 1.15fr) minmax(80px, 0.45fr);
+}
+
 .hotspot-table-header {
   background: #fafbfc;
   color: var(--dash-muted);
@@ -372,6 +377,11 @@ body {
 .hotspot-table-header > span:first-child {
   justify-self: center;
   text-align: center;
+}
+
+.tiktok-hotspot-table .hotspot-table-header > span:first-child {
+  justify-self: start;
+  text-align: left;
 }
 
 .hotspot-table-row > .hotspot-table-row__select-cell {
@@ -831,6 +841,17 @@ body {
   .hotspot-table-row__col--action {
     grid-column: 2;
     width: 100%;
+  }
+
+  .tiktok-hotspot-table .hotspot-table-row {
+    grid-template-columns: 1fr;
+  }
+
+  .tiktok-hotspot-table .hotspot-table-row__col--title,
+  .tiktok-hotspot-table .hotspot-table-row__col--summary,
+  .tiktok-hotspot-table .hotspot-table-row__col--meta,
+  .tiktok-hotspot-table .hotspot-table-row__col--action {
+    grid-column: 1;
   }
 
   .hotspot-table-row-extra {

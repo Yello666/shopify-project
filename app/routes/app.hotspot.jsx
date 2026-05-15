@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Button, Space, Spin, Empty, message, Modal, InputNumber, Switch, Select, Tooltip } from "antd";
+import { Button, Space, Spin, Empty, message, Modal, InputNumber, Switch, Select, Tooltip, Input } from "antd";
 import { DownOutlined } from "@ant-design/icons";
 import { authFetch } from "../utils/auth-api";
  
@@ -151,6 +151,13 @@ function normalizeProductOpportunities(item) {
   if (Array.isArray(raw)) return raw.filter((op) => op && typeof op === "object");
   if (raw && typeof raw === "object") return [raw];
   return [];
+}
+
+function parseHashtagsInput(value) {
+  return String(value || "")
+    .split(/[\s,，#]+/)
+    .map((tag) => tag.trim().replace(/^#+/, ""))
+    .filter(Boolean);
 }
 
 function productOpportunityRowKey(opportunity, idx) {
@@ -537,6 +544,8 @@ export default function Hotspot() {
   const [recommendMinScore, setRecommendMinScore] = useState(DEFAULT_MIN_COMPATIBILITY_SCORE);
   const [recommendSubmitting, setRecommendSubmitting] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [tiktokModalOpen, setTiktokModalOpen] = useState(false);
+  const [tiktokHashtagsDraft, setTiktokHashtagsDraft] = useState("");
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
   const [scheduleState, setScheduleState] = useState(DEFAULT_SCHEDULE_STATE);
@@ -693,6 +702,21 @@ export default function Hotspot() {
       interval_hours: Number(scheduleState.interval_hours) || 24,
     });
     setScheduleModalOpen(true);
+  };
+
+  const handleOpenTiktokModal = () => {
+    setTiktokHashtagsDraft("");
+    setTiktokModalOpen(true);
+  };
+
+  const handleGoTiktokHotspot = () => {
+    const hashtags = parseHashtagsInput(tiktokHashtagsDraft);
+    if (!hashtags.length) {
+      message.warning("请至少输入一个 hashtag");
+      return;
+    }
+    setTiktokModalOpen(false);
+    navigate(`/app/tiktok-hotspot?hashtags=${encodeURIComponent(hashtags.join(","))}`);
   };
 
   // 调用 POST /hotspot/recommend，用返回列表替换当前热点并进入推荐展开视图（纯服务端筛选）
@@ -907,6 +931,9 @@ export default function Hotspot() {
               <Button onClick={() => navigate("/app/own-hotspot")}>
                 我的热点
               </Button>
+              <Button onClick={handleOpenTiktokModal}>
+                TikTok 热点
+              </Button>
               {recommendationMode ? (
                 <Button
                   type="default"
@@ -1042,6 +1069,31 @@ export default function Hotspot() {
               </Button>
               <Button type="primary" onClick={handleConfirmStartRecommend} loading={recommendSubmitting}>
                 开始过滤
+              </Button>
+            </Space>
+          </Modal>
+
+          <Modal
+            title="获取 TikTok 热点"
+            open={tiktokModalOpen}
+            onCancel={() => setTiktokModalOpen(false)}
+            footer={null}
+            destroyOnHidden
+            width={440}
+          >
+            <p style={{ marginTop: 0, marginBottom: 12, color: "var(--dash-muted)", fontSize: "0.875rem" }}>
+              请输入一个或多个 hashtags，可用空格、逗号或 # 分隔。
+            </p>
+            <Input
+              value={tiktokHashtagsDraft}
+              onChange={(e) => setTiktokHashtagsDraft(e.target.value)}
+              onPressEnter={handleGoTiktokHotspot}
+              placeholder="例如：skincare, beauty 或 #fyp"
+            />
+            <Space style={{ width: "100%", justifyContent: "flex-end", marginTop: 16 }}>
+              <Button onClick={() => setTiktokModalOpen(false)}>取消</Button>
+              <Button type="primary" onClick={handleGoTiktokHotspot}>
+                查看 TikTok 热点
               </Button>
             </Space>
           </Modal>

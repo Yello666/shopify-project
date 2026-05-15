@@ -1513,9 +1513,9 @@ export default function VideoChatPage() {
   const activeProgressStep = activeThreadView?.current_step || "-";
   const activeProgressStatus = activeThreadView?.status || "idle";
   const inputPlaceholder = activeVideoReview
-    ? "请输入视频不满意的点，点击“反馈重写分镜”提交（Shift+Enter 换行）"
+    ? "请输入视频不满意的点，我们将会帮您重新生成分镜，注意已生成的视频将会丢失"
     : activeScriptReview
-    ? "请输入重写要求，点击“反馈重写”提交（Shift+Enter 换行）"
+    ? "如需由大模型重新生成分镜脚本，请输入重写要求，点击“反馈重写”提交（Shift+Enter 换行）"
     : "发消息…（Shift+Enter 换行）";
 
   /** 同一 session + thread + 分镜指纹只往聊天里推一次，避免 SSE `state` 重复刷气泡 */
@@ -3429,9 +3429,14 @@ export default function VideoChatPage() {
                     : "取消选择"}
               </Button>
             ) : null}
-            <Button size="small" type="primary" onClick={handleResumeApprove} loading={activeThreadRequesting}>
-              {activeVideoReview ? "确认成片" : "通过"}
-            </Button>
+            <Tooltip
+              title={activeVideoReview ? "确认成片之后无法重新生成哦" : undefined}
+              placement="top"
+            >
+              <Button size="small" type="primary" onClick={handleResumeApprove} loading={activeThreadRequesting}>
+                {activeVideoReview ? "确认成片" : "通过"}
+              </Button>
+            </Tooltip>
             {!activeSegmentBulkFieldEdit ? (
               <Button
                 size="small"
