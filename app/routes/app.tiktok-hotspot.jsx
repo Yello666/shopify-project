@@ -757,7 +757,7 @@ export default function TiktokHotspot() {
                 }`}
               >
                 <div className="hotspot-table-header" role="row">
-                  <span aria-hidden={!isRecommendList}>{isRecommendList ? "匹配分" : ""}</span>
+                  {isRecommendList ? <span>匹配分</span> : null}
                   <span>标题</span>
                   <span>摘要</span>
                   <span>平台与时间</span>
