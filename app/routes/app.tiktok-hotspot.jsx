@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { Button, Empty, Input, InputNumber, message, Modal, Space, Spin, Tooltip } from "antd";
+import { Button, Dropdown, Empty, Input, InputNumber, message, Modal, Space, Spin, Tooltip } from "antd";
 import { DownOutlined } from "@ant-design/icons";
 import { authFetch } from "../utils/auth-api";
 
@@ -187,6 +187,76 @@ function parseMatchScoreNumber(item) {
     return Number.isFinite(n) ? n : null;
   }
   return null;
+}
+
+const RECOMMEND_SORT_OPTIONS = [
+  { key: "match_score", label: "匹配分" },
+  { key: "view_count", label: "播放量" },
+  { key: "likes", label: "点赞数" },
+  { key: "comment_count", label: "评论数" },
+  { key: "share_count", label: "分享数" },
+  { key: "collect_count", label: "收藏数" },
+  { key: "duration_seconds", label: "视频时长" },
+  { key: "publish_time", label: "发布时间" },
+];
+
+const RECOMMEND_SORT_RESET_KEY = "__reset__";
+
+function parseNumericSortValue(raw) {
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string" && raw.trim()) {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function getRecommendSortValue(item, field) {
+  switch (field) {
+    case "match_score":
+      return parseMatchScoreNumber(item);
+    case "view_count":
+      return parseNumericSortValue(item?.view_count);
+    case "likes":
+      return parseNumericSortValue(item?.likes);
+    case "comment_count":
+      return parseNumericSortValue(item?.comment_count);
+    case "share_count":
+      return parseNumericSortValue(item?.share_count);
+    case "collect_count":
+      return parseNumericSortValue(item?.collect_count);
+    case "duration_seconds":
+      return parseNumericSortValue(item?.duration_seconds);
+    case "publish_time": {
+      if (!item?.publish_time) return null;
+      const t = new Date(item.publish_time).getTime();
+      return Number.isFinite(t) ? t : null;
+    }
+    default:
+      return null;
+  }
+}
+
+function compareRecommendSortItems(a, b, field, order) {
+  const va = getRecommendSortValue(a, field);
+  const vb = getRecommendSortValue(b, field);
+  const aMissing = va == null;
+  const bMissing = vb == null;
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return 1;
+  if (bMissing) return -1;
+  if (order === "desc") return vb - va;
+  return va - vb;
+}
+
+function sortRecommendItems(items, field, order) {
+  const copy = [...items];
+  copy.sort((a, b) => compareRecommendSortItems(a, b, field, order));
+  return copy;
+}
+
+function recommendSortLabel(field) {
+  return RECOMMEND_SORT_OPTIONS.find((opt) => opt.key === field)?.label ?? "";
 }
 
 function matchScoreToneClass(score) {
@@ -398,7 +468,7 @@ export default function TiktokHotspot() {
   const [recommendModalOpen, setRecommendModalOpen] = useState(false);
   const [recommendMinScore, setRecommendMinScore] = useState(DEFAULT_MIN_COMPATIBILITY_SCORE);
   const [recommendSubmitting, setRecommendSubmitting] = useState(false);
-  const [scoreSortOrder, setScoreSortOrder] = useState(null);
+  const [listSort, setListSort] = useState({ field: null, order: "desc" });
 
   useEffect(() => {
     setDraft(hashtags.join(", "));
@@ -417,7 +487,7 @@ export default function TiktokHotspot() {
     setError("");
     setIsRecommendList(false);
     setSelectedHotspots({});
-    setScoreSortOrder(null);
+    setListSort({ field: null, order: "desc" });
     try {
       const res = await authFetch("/api/v1/hotspot/tiktok/hashtag", {
         method: "POST",
@@ -485,7 +555,7 @@ export default function TiktokHotspot() {
       setItems(mapped);
       setSelectedHotspots({});
       setIsRecommendList(true);
-      setScoreSortOrder(null);
+      setListSort({ field: null, order: "desc" });
       setRecommendModalOpen(false);
       const appliedMin = Number(envelope?.min_compatibility_score);
       if (Number.isFinite(appliedMin)) {
@@ -537,29 +607,43 @@ export default function TiktokHotspot() {
     navigate(`/app/generate?hotspot=${encoded}`);
   };
 
-  const cycleScoreSort = () => {
-    setScoreSortOrder((prev) => {
-      if (prev == null) return "desc";
-      if (prev === "desc") return "asc";
-      return null;
+  const handleRecommendSortMenuClick = useCallback(({ key }) => {
+    if (key === RECOMMEND_SORT_RESET_KEY) {
+      setListSort({ field: null, order: "desc" });
+      return;
+    }
+    setListSort((prev) => {
+      if (prev.field === key) {
+        return { field: key, order: prev.order === "desc" ? "asc" : "desc" };
+      }
+      return { field: key, order: "desc" };
     });
-  };
+  }, []);
+
+  const recommendSortMenu = useMemo(
+    () => ({
+      items: [
+        ...RECOMMEND_SORT_OPTIONS.map((opt) => ({ key: opt.key, label: opt.label })),
+        { type: "divider" },
+        { key: RECOMMEND_SORT_RESET_KEY, label: "恢复默认顺序" },
+      ],
+      selectedKeys: listSort.field ? [listSort.field] : [],
+      onClick: handleRecommendSortMenuClick,
+    }),
+    [listSort.field, handleRecommendSortMenuClick],
+  );
+
+  const recommendSortButtonLabel = useMemo(() => {
+    if (!listSort.field) return "排序";
+    const label = recommendSortLabel(listSort.field);
+    const arrow = listSort.order === "desc" ? "↓" : "↑";
+    return `排序：${label} ${arrow}`;
+  }, [listSort.field, listSort.order]);
 
   const displayItems = useMemo(() => {
-    if (!scoreSortOrder) return items;
-    const copy = [...items];
-    const scoreOf = (it) => {
-      const n = parseMatchScoreNumber(it);
-      return n == null ? -1 : n;
-    };
-    copy.sort((a, b) => {
-      const da = scoreOf(a);
-      const db = scoreOf(b);
-      if (scoreSortOrder === "desc") return db - da;
-      return da - db;
-    });
-    return copy;
-  }, [items, scoreSortOrder]);
+    if (!listSort.field) return items;
+    return sortRecommendItems(items, listSort.field, listSort.order);
+  }, [items, listSort.field, listSort.order]);
 
   const emptyDescription = isRecommendList
     ? "暂无达到阈值的推荐热点"
@@ -624,13 +708,12 @@ export default function TiktokHotspot() {
                   </Button>
                 ) : null}
                 {isRecommendList ? (
-                  <Button onClick={cycleScoreSort}>
-                    {scoreSortOrder == null
-                      ? "按匹配分排序（高→低）"
-                      : scoreSortOrder === "desc"
-                      ? "按匹配分排序（低→高）"
-                      : "恢复列表顺序"}
-                  </Button>
+                  <Dropdown menu={recommendSortMenu} trigger={["click"]}>
+                    <Button>
+                      {recommendSortButtonLabel}
+                      <DownOutlined style={{ marginLeft: 6, fontSize: 10 }} aria-hidden />
+                    </Button>
+                  </Dropdown>
                 ) : null}
                 {isRecommendList ? (
                   <Button type="primary" onClick={handleGenerate}>
