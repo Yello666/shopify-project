@@ -117,6 +117,14 @@ export default function Index() {
     }
     navigate("/app/products");
   };
+  const handleProductSelect = () => {
+    if (!currentUser) {
+      message.warning("请先登录后再使用选品系统");
+      openAuthLogin();
+      return;
+    }
+    navigate("/app/product-select");
+  };
   const handleVideoChat = () => navigate("/app/video-chat");
 
   const loadPriceProducts = async () => {
@@ -475,6 +483,21 @@ export default function Index() {
             </p>
             <Button type="primary" onClick={handleVideoChat}>
               进入视频生成
+            </Button>
+          </div>
+
+          <div className="dash-feature-card dash-accent-teal">
+            <div className="dash-feature-card__head">
+              <h2 className="dash-card-title">选品系统</h2>
+              <span className="dash-icon-box" aria-hidden>
+                🔎
+              </span>
+            </div>
+            <p className="dash-feature-card__desc">
+              监控社媒红人内容，识别潜在爆品，并通过供应链搜索验证可采购性
+            </p>
+            <Button type="primary" onClick={handleProductSelect}>
+              进入选品系统
             </Button>
           </div>
         </div>
