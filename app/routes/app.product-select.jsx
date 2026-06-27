@@ -37,13 +37,6 @@ const LENS_TYPE_OPTIONS = [
   { value: "all", label: "all 全部" },
 ];
 
-const MATCH_SOURCE_OPTIONS = [
-  { value: "google_lens", label: "google_lens" },
-  { value: "amazon", label: "amazon" },
-  { value: "taobao", label: "taobao" },
-  { value: "1688", label: "1688" },
-];
-
 function pickResponseData(json) {
   return json?.data && typeof json.data === "object" ? json.data : json;
 }
@@ -77,6 +70,20 @@ function getMatchImage(match) {
   return match?.thumbnail || match?.image || match?.thumbnail_url || "";
 }
 
+function getObjectPreviewImage(record) {
+  const cropImage = record?.crop_image;
+  const sourceImage = record?.source_image;
+  return cropImage?.oss_url || cropImage?.local_path || sourceImage?.oss_url || sourceImage?.source_url || sourceImage?.local_path || "";
+}
+
+function getSourceMonitorName(record) {
+  return record?.source_monitor?.display_name || record?.source_monitor?.handle || "";
+}
+
+function getSourceContentTitle(record) {
+  return record?.source_content?.caption_or_title || record?.source_content?.external_id || "";
+}
+
 function formatMatchPrice(match) {
   if (match?.price_text) return match.price_text;
   if (match?.price == null) return "—";
@@ -108,7 +115,6 @@ export default function ProductSelectPage() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [supplySubmitting, setSupplySubmitting] = useState(false);
   const [objectLoading, setObjectLoading] = useState(false);
-  const [matchLoading, setMatchLoading] = useState(false);
   const [supplyMatchObjectId, setSupplyMatchObjectId] = useState(null);
 
   const [monitors, setMonitors] = useState({ items: [], returned_count: 0 });
@@ -203,6 +209,7 @@ export default function ProductSelectPage() {
         if (values.potential) params.set("potential", values.potential);
         if (values.related_ip) params.set("related_ip", values.related_ip.trim());
         if (values.category) params.set("category", values.category.trim());
+        if (values.include_test) params.set("include_test", "true");
         params.set("limit", String(values.limit || 100));
         params.set("offset", String(values.offset || 0));
 
@@ -228,63 +235,43 @@ export default function ProductSelectPage() {
     [objectForm],
   );
 
-  const loadMatches = useCallback(async (objectId, source = null) => {
-    if (objectId == null) return;
-    setMatchLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (source) params.set("source", source);
-      params.set("limit", "100");
-      const res = await authFetch(`${PRODUCT_SELECT_BASE}/objects/${objectId}/matches?${params.toString()}`);
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detail = json?.detail || json?.message || `获取失败: ${res.status}`;
-        throw new Error(typeof detail === "string" ? detail : "匹配结果加载失败");
-      }
-      const data = pickResponseData(json);
-      setMatches({
-        items: Array.isArray(data?.items) ? data.items : [],
-        returned_count: Number(data?.returned_count) || 0,
-      });
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : "匹配结果加载失败");
-      setMatches({ items: [], returned_count: 0 });
-    } finally {
-      setMatchLoading(false);
-    }
-  }, []);
-
-  const runObjectSupplyMatch = async (record) => {
+  const loadObjectProductMatches = async (record, refresh = false) => {
     if (!record?.id) return;
     setSupplyMatchObjectId(record.id);
     setSelectedObject(record);
     setMatches({ items: [], returned_count: 0 });
     setMatchModalOpen(true);
     try {
-      const res = await authFetch(`${PRODUCT_SELECT_BASE}/objects/${record.id}/supply-match`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          force: false,
-          lens_type: "products",
-          limit: 3,
-        }),
-      });
+      const url = `${PRODUCT_SELECT_BASE}/objects/${record.id}/matches`;
+      const res = await authFetch(
+        refresh ? `${url}/refresh` : `${url}?${new URLSearchParams({ limit: "3" }).toString()}`,
+        refresh
+          ? {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                lens_type: "products",
+                limit: 3,
+              }),
+            }
+          : undefined,
+      );
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = json?.detail || json?.message || `获取失败: ${res.status}`;
-        throw new Error(typeof detail === "string" ? detail : "供应链匹配失败");
+        throw new Error(typeof detail === "string" ? detail : "商品匹配失败");
       }
       const data = pickResponseData(json);
-      const topMatches = Array.isArray(data?.top_matches) ? data.top_matches : [];
+      const rawMatches = refresh ? data?.top_matches : data?.items;
+      const topMatches = Array.isArray(rawMatches) ? rawMatches.slice(0, 3) : [];
       setMatches({
         items: topMatches,
-        returned_count: Number(data?.matched_count) || topMatches.length,
+        returned_count: topMatches.length,
       });
-      message.success(data?.from_cache ? "已加载缓存供应链匹配" : "供应链匹配完成");
-      loadObjects();
+      message.success(refresh ? "商品匹配已刷新" : "已加载商品匹配");
+      if (refresh) loadObjects();
     } catch (e) {
-      message.error(e instanceof Error ? e.message : "供应链匹配失败");
+      message.error(e instanceof Error ? e.message : "商品匹配失败");
       setMatches({ items: [], returned_count: 0 });
     } finally {
       setSupplyMatchObjectId(null);
@@ -458,14 +445,13 @@ export default function ProductSelectPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = json?.detail || json?.message || `测试失败: ${res.status}`;
-        throw new Error(typeof detail === "string" ? detail : "供应链测试失败");
+        throw new Error(typeof detail === "string" ? detail : "商品匹配测试失败");
       }
       setSupplyResult(pickResponseData(json));
-      message.success("供应链测试完成");
-      loadObjects();
+      message.success("商品匹配测试完成");
     } catch (e) {
       if (e?.errorFields) return;
-      message.error(e instanceof Error ? e.message : "供应链测试失败");
+      message.error(e instanceof Error ? e.message : "商品匹配测试失败");
     } finally {
       setSupplySubmitting(false);
     }
@@ -549,13 +535,6 @@ export default function ProductSelectPage() {
       },
     },
   ];
-
-  const openMatches = (record) => {
-    setSelectedObject(record);
-    setMatches({ items: [], returned_count: 0 });
-    setMatchModalOpen(true);
-    loadMatches(record.id);
-  };
 
   const openSupplyMatches = (record) => {
     setSelectedSupplyItem(record);
@@ -648,16 +627,70 @@ export default function ProductSelectPage() {
 
   const objectColumns = [
     {
+      title: "图片",
+      key: "image",
+      width: 104,
+      render: (_, record) => {
+        const image = getObjectPreviewImage(record);
+        return image ? (
+          <a href={image} target="_blank" rel="noopener noreferrer">
+            <img
+              src={image}
+              alt={record.category || "商品机会"}
+              style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8 }}
+            />
+          </a>
+        ) : (
+          "—"
+        );
+      },
+    },
+    {
       title: "商品机会",
       key: "object",
       render: (_, record) => (
         <div>
-          <div style={{ fontWeight: 600 }}>{record.category || "未分类商品机会"}</div>
+          <Space size={6} wrap>
+            <span style={{ fontWeight: 600 }}>{record.category || "未分类商品机会"}</span>
+            {record.is_test ? <Tag>测试</Tag> : null}
+          </Space>
           <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
             关联 IP：{formatMaybe(record.related_ip)}
           </div>
         </div>
       ),
+    },
+    {
+      title: "来源 IP/账号",
+      key: "sourceMonitor",
+      width: 160,
+      render: (_, record) => formatMaybe(getSourceMonitorName(record)),
+    },
+    {
+      title: "来源内容",
+      key: "sourceContent",
+      width: 220,
+      ellipsis: true,
+      render: (_, record) => {
+        const content = record.source_content || {};
+        return (
+          <div>
+            {content.url ? (
+              <a href={content.url} target="_blank" rel="noopener noreferrer">
+                查看原帖
+              </a>
+            ) : (
+              <span>—</span>
+            )}
+            <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
+              {formatMaybe(getSourceContentTitle(record))}
+            </div>
+            <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
+              {formatMaybe(content.published_at)}
+            </div>
+          </div>
+        );
+      },
     },
     {
       title: "潜力",
@@ -694,12 +727,17 @@ export default function ProductSelectPage() {
             type="link"
             style={{ padding: 0 }}
             loading={supplyMatchObjectId === record.id}
-            onClick={() => runObjectSupplyMatch(record)}
+            onClick={() => loadObjectProductMatches(record, false)}
           >
-            获取供应链
+            查看商品匹配
           </Button>
-          <Button type="link" style={{ padding: 0 }} onClick={() => openMatches(record)}>
-            查看已有匹配
+          <Button
+            type="link"
+            style={{ padding: 0 }}
+            loading={supplyMatchObjectId === record.id}
+            onClick={() => loadObjectProductMatches(record, true)}
+          >
+            刷新商品匹配
           </Button>
         </Space>
       ),
@@ -941,7 +979,7 @@ export default function ProductSelectPage() {
               <Alert
                 type="info"
                 showIcon
-                message="从 Instagram 内容识别潜在商品，再聚合为选品总表，并可对图片做供应链搜索验证。"
+                message="从 Instagram 内容识别潜在商品，再聚合为选品总表，并可对图片做商品匹配验证。"
               />
 
               <Card title="1. 监控账号管理">
@@ -1105,7 +1143,7 @@ export default function ProductSelectPage() {
                 <Form
                   form={objectForm}
                   layout="inline"
-                  initialValues={{ limit: 100, offset: 0 }}
+                  initialValues={{ include_test: false, limit: 100, offset: 0 }}
                   onFinish={loadObjects}
                   style={{ rowGap: 12, marginBottom: 16 }}
                 >
@@ -1117,6 +1155,15 @@ export default function ProductSelectPage() {
                   </Form.Item>
                   <Form.Item label="品类" name="category">
                     <Input placeholder="category" style={{ width: 160 }} allowClear />
+                  </Form.Item>
+                  <Form.Item label="测试数据" name="include_test">
+                    <Select
+                      style={{ width: 150 }}
+                      options={[
+                        { value: false, label: "不包含" },
+                        { value: true, label: "包含" },
+                      ]}
+                    />
                   </Form.Item>
                   <Form.Item label="数量" name="limit">
                     <InputNumber min={1} max={500} />
@@ -1142,7 +1189,7 @@ export default function ProductSelectPage() {
                     columns={objectColumns}
                     dataSource={objects.items}
                     pagination={{ pageSize: 10, showSizeChanger: true }}
-                    scroll={{ x: 900 }}
+                    scroll={{ x: 1040 }}
                   />
                 )}
               </Card>
@@ -1151,13 +1198,13 @@ export default function ProductSelectPage() {
                 items={[
                   {
                     key: "advanced",
-                    label: "高级工具（文件汇总 / 手动供应链测试）",
+                    label: "高级工具（文件汇总 / 手动商品匹配测试）",
                     children: (
                       <Space direction="vertical" size="middle" style={{ width: "100%" }}>
                         <Alert
                           type="warning"
                           showIcon
-                          message="这里是调试和补数据工具。日常使用优先在「数据库商品机会」列表里查看供应链匹配。"
+                          message="这里是调试和补数据工具。日常使用优先在「数据库商品机会」列表里查看商品匹配。"
                         />
                         <Card
                           title="生成文件汇总"
@@ -1233,7 +1280,7 @@ export default function ProductSelectPage() {
                           )}
                         </Card>
 
-                        <Card title="手动供应链测试">
+                        <Card title="手动商品匹配测试">
                           <Form
                             form={supplyForm}
                             layout="vertical"
@@ -1243,7 +1290,7 @@ export default function ProductSelectPage() {
                               label="图片路径"
                               name="images"
                               rules={[{ required: true, message: "请填写图片路径" }]}
-                              extra="仅用于调试或补跑单张图片；多张图片可换行或用逗号分隔。"
+                              extra="仅用于调试单张图片，不写入数据库；多张图片可换行或用逗号分隔。"
                             >
                               <Input.TextArea rows={3} placeholder="例如：data/productSelect/instagram/user/post/image.jpg" />
                             </Form.Item>
@@ -1257,7 +1304,7 @@ export default function ProductSelectPage() {
                             </Space>
                             <div>
                               <Button type="primary" onClick={runSupplyTest} loading={supplySubmitting}>
-                                开始供应链测试
+                                开始商品匹配测试
                               </Button>
                             </div>
                           </Form>
@@ -1292,7 +1339,7 @@ export default function ProductSelectPage() {
         </s-section>
       </s-page>
       <Modal
-        title={`供应链匹配：${selectedObject?.category || selectedObject?.id || ""}`}
+        title={`商品匹配：${selectedObject?.category || selectedObject?.id || ""}`}
         open={matchModalOpen}
         onCancel={() => setMatchModalOpen(false)}
         footer={null}
@@ -1303,35 +1350,22 @@ export default function ProductSelectPage() {
           <Alert
             type="info"
             showIcon
-            message={`当前商品机会 ID：${formatMaybe(selectedObject?.id)}，关联 IP：${formatMaybe(
-              selectedObject?.related_ip,
-            )}`}
+            message={`当前商品机会 ID：${formatMaybe(selectedObject?.id)}，来源 IP/账号：${formatMaybe(
+              getSourceMonitorName(selectedObject),
+            )}，关联 IP：${formatMaybe(selectedObject?.related_ip)}，仅展示前三个匹配商品`}
           />
-          <Space wrap>
-            <span style={{ color: "var(--dash-muted)" }}>按来源筛选</span>
-            <Select
-              allowClear
-              placeholder="全部来源"
-              style={{ width: 220 }}
-              options={MATCH_SOURCE_OPTIONS}
-              onChange={(value) => loadMatches(selectedObject?.id, value)}
-            />
-            <Button onClick={() => loadMatches(selectedObject?.id)} loading={matchLoading}>
-              刷新
-            </Button>
-          </Space>
           <Table
-            rowKey={(record) => record.id}
+            rowKey={(record, index) => record.id || getMatchUrl(record) || `${record.title || "match"}-${index}`}
             columns={matchColumns}
             dataSource={matches.items}
-            loading={matchLoading || supplyMatchObjectId != null}
-            pagination={{ pageSize: 8, showSizeChanger: true }}
+            loading={supplyMatchObjectId != null}
+            pagination={false}
             scroll={{ x: 860 }}
           />
         </Space>
       </Modal>
       <Modal
-        title={`供应链匹配详情：${selectedSupplyItem?.category || "对应商品"}`}
+        title={`商品匹配详情：${selectedSupplyItem?.category || "对应商品"}`}
         open={supplyMatchModalOpen}
         onCancel={() => setSupplyMatchModalOpen(false)}
         footer={null}
