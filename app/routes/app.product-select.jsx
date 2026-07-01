@@ -80,10 +80,6 @@ function getSourceMonitorName(record) {
   return record?.source_monitor?.display_name || record?.source_monitor?.handle || "";
 }
 
-function getSourceContentTitle(record) {
-  return record?.source_content?.caption_or_title || record?.source_content?.external_id || "";
-}
-
 function formatMatchPrice(match) {
   if (match?.price_text) return match.price_text;
   if (match?.price == null) return "—";
@@ -128,6 +124,7 @@ export default function ProductSelectPage() {
   const [summaryError, setSummaryError] = useState("");
   const [supplyResult, setSupplyResult] = useState(null);
   const [objects, setObjects] = useState({ items: [], returned_count: 0 });
+  const [objectFilters, setObjectFilters] = useState({});
   const [objectError, setObjectError] = useState("");
   const [matches, setMatches] = useState({ items: [], returned_count: 0 });
   const [selectedObject, setSelectedObject] = useState(null);
@@ -209,12 +206,9 @@ export default function ProductSelectPage() {
       setObjectError("");
       try {
         const params = new URLSearchParams();
-        if (values.potential) params.set("potential", values.potential);
-        if (values.related_ip) params.set("related_ip", values.related_ip.trim());
         if (values.category) params.set("category", values.category.trim());
-        if (values.include_test) params.set("include_test", "true");
-        params.set("limit", String(values.limit || 100));
-        params.set("offset", String(values.offset || 0));
+        params.set("limit", "500");
+        params.set("offset", "0");
 
         const res = await authFetch(`${PRODUCT_SELECT_BASE}/objects?${params.toString()}`);
         const json = await res.json().catch(() => ({}));
@@ -226,6 +220,10 @@ export default function ProductSelectPage() {
         setObjects({
           items: Array.isArray(data?.items) ? data.items : [],
           returned_count: Number(data?.returned_count) || 0,
+        });
+        setObjectFilters({
+          potential: values?.potential,
+          source_monitor: values?.source_monitor,
         });
       } catch (e) {
         const detail = e instanceof Error ? e.message : "商品机会加载失败";
@@ -262,7 +260,7 @@ export default function ProductSelectPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = json?.detail || json?.message || `获取失败: ${res.status}`;
-        throw new Error(typeof detail === "string" ? detail : "商品匹配失败");
+        throw new Error(typeof detail === "string" ? detail : "相似商品失败");
       }
       const data = pickResponseData(json);
       const rawMatches = refresh ? data?.top_matches : data?.items;
@@ -271,10 +269,10 @@ export default function ProductSelectPage() {
         items: topMatches,
         returned_count: topMatches.length,
       });
-      message.success(refresh ? "商品匹配已刷新" : "已加载商品匹配");
+      message.success(refresh ? "相似商品已刷新" : "已加载相似商品");
       if (refresh) loadObjects();
     } catch (e) {
-      message.error(e instanceof Error ? e.message : "商品匹配失败");
+      message.error(e instanceof Error ? e.message : "相似商品失败");
       setMatches({ items: [], returned_count: 0 });
     } finally {
       setSupplyMatchObjectId(null);
@@ -383,6 +381,14 @@ export default function ProductSelectPage() {
     setSelectedMonitors((current) => current.filter((item) => item.id !== monitorId));
   };
 
+  const handleObjectFilterChange = (changedValues, allValues) => {
+    if (!("potential" in changedValues) && !("source_monitor" in changedValues)) return;
+    setObjectFilters({
+      potential: allValues.potential,
+      source_monitor: allValues.source_monitor,
+    });
+  };
+
   const openMonitorEdit = (record) => {
     setEditingMonitor(record);
     monitorEditForm.setFieldsValue({
@@ -464,13 +470,13 @@ export default function ProductSelectPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = json?.detail || json?.message || `测试失败: ${res.status}`;
-        throw new Error(typeof detail === "string" ? detail : "商品匹配测试失败");
+        throw new Error(typeof detail === "string" ? detail : "相似商品测试失败");
       }
       setSupplyResult(pickResponseData(json));
-      message.success("商品匹配测试完成");
+      message.success("相似商品测试完成");
     } catch (e) {
       if (e?.errorFields) return;
-      message.error(e instanceof Error ? e.message : "商品匹配测试失败");
+      message.error(e instanceof Error ? e.message : "相似商品测试失败");
     } finally {
       setSupplySubmitting(false);
     }
@@ -495,6 +501,25 @@ export default function ProductSelectPage() {
       }));
     });
   }, [supplyResult]);
+
+  const sourceIpOptions = useMemo(() => {
+    const values = new Set();
+    for (const item of objects.items) {
+      const sourceName = getSourceMonitorName(item);
+      if (sourceName) values.add(String(sourceName));
+    }
+    return Array.from(values)
+      .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+      .map((value) => ({ value, label: value }));
+  }, [objects.items]);
+
+  const displayedObjects = useMemo(() => {
+    return objects.items.filter((item) => {
+      if (objectFilters.potential && item.ecommerce_potential !== objectFilters.potential) return false;
+      if (objectFilters.source_monitor && getSourceMonitorName(item) !== objectFilters.source_monitor) return false;
+      return true;
+    });
+  }, [objectFilters.potential, objectFilters.source_monitor, objects.items]);
 
   const columns = [
     {
@@ -651,49 +676,33 @@ export default function ProductSelectPage() {
     {
       title: "商品机会",
       key: "object",
+      width: 160,
       render: (_, record) => (
         <div>
           <Space size={6} wrap>
-            <span style={{ fontWeight: 600 }}>{record.category || "未分类商品机会"}</span>
+            <span style={{ fontWeight: 600, whiteSpace: "normal", wordBreak: "break-word" }}>
+              {record.category || "未分类商品机会"}
+            </span>
             {record.is_test ? <Tag>测试</Tag> : null}
           </Space>
           <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
-            关联 IP：{formatMaybe(record.related_ip)}
+            来源 IP：{formatMaybe(record.related_ip)}
           </div>
         </div>
       ),
     },
     {
-      title: "来源 IP/账号",
+      title: "来源 IP",
       key: "sourceMonitor",
       width: 160,
-      render: (_, record) => formatMaybe(getSourceMonitorName(record)),
-    },
-    {
-      title: "来源内容",
-      key: "sourceContent",
-      width: 220,
-      ellipsis: true,
-      render: (_, record) => {
-        const content = record.source_content || {};
-        return (
-          <div>
-            {content.url ? (
-              <a href={content.url} target="_blank" rel="noopener noreferrer">
-                查看原帖
-              </a>
-            ) : (
-              <span>—</span>
-            )}
-            <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
-              {formatMaybe(getSourceContentTitle(record))}
-            </div>
-            <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
-              {formatMaybe(content.published_at)}
-            </div>
+      render: (_, record) => (
+        <div>
+          <div>{formatMaybe(getSourceMonitorName(record))}</div>
+          <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
+            {formatMaybe(record.source_monitor?.platform)}
           </div>
-        );
-      },
+        </div>
+      ),
     },
     {
       title: "潜力",
@@ -705,45 +714,49 @@ export default function ProductSelectPage() {
     {
       title: "说明",
       key: "description",
-      ellipsis: true,
-      render: (_, record) => formatMaybe(record.description || record.reason),
+      width: 220,
+      render: (_, record) => (
+        <div style={{ fontSize: 12, whiteSpace: "normal", wordBreak: "break-word" }}>
+          {formatMaybe(record.description || record.reason)}
+        </div>
+      ),
     },
     {
       title: "属性",
       key: "attributes",
-      ellipsis: true,
-      render: (_, record) => formatMaybe(record.attributes),
-    },
-    {
-      title: "ID",
-      dataIndex: "id",
-      key: "id",
-      width: 80,
+      width: 220,
+      render: (_, record) => (
+        <div style={{ fontSize: 12, whiteSpace: "normal", wordBreak: "break-word" }}>
+          {formatMaybe(record.attributes)}
+        </div>
+      ),
     },
     {
       title: "操作",
       key: "action",
-      width: 220,
-      render: (_, record) => (
-        <Space size="small" wrap>
-          <Button
-            type="link"
-            style={{ padding: 0 }}
-            loading={supplyMatchObjectId === record.id}
-            onClick={() => loadObjectProductMatches(record, false)}
-          >
-            查看商品匹配
-          </Button>
-          <Button
-            type="link"
-            style={{ padding: 0 }}
-            loading={supplyMatchObjectId === record.id}
-            onClick={() => loadObjectProductMatches(record, true)}
-          >
-            刷新商品匹配
-          </Button>
-        </Space>
-      ),
+      width: 130,
+      render: (_, record) => {
+        const contentUrl = record.source_content?.url;
+        return (
+          <Space direction="vertical" size={2}>
+            {contentUrl ? (
+              <a href={contentUrl} target="_blank" rel="noopener noreferrer">
+                查看原帖
+              </a>
+            ) : (
+              <span style={{ color: "var(--dash-muted)" }}>暂无原帖</span>
+            )}
+            <Button
+              type="link"
+              style={{ padding: 0 }}
+              loading={supplyMatchObjectId === record.id}
+              onClick={() => loadObjectProductMatches(record, false)}
+            >
+              查看相似商品
+            </Button>
+          </Space>
+        );
+      },
     },
   ];
 
@@ -829,7 +842,7 @@ export default function ProductSelectPage() {
         <div>
           <div style={{ fontWeight: 600 }}>{record.category || "未分类商品"}</div>
           <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
-            关联 IP：{formatMaybe(record.related_ip)}
+            来源 IP：{formatMaybe(record.related_ip)}
           </div>
         </div>
       ),
@@ -1027,7 +1040,7 @@ export default function ProductSelectPage() {
                     rowKey={(record) => record.id}
                     columns={monitorColumns}
                     dataSource={monitors.items}
-                    pagination={{ pageSize: 5, showSizeChanger: true }}
+                    pagination={{ defaultPageSize: 6, showSizeChanger: true, pageSizeOptions: [6, 10, 20, 50] }}
                     scroll={{ x: 900 }}
                   />
                 )}
@@ -1106,33 +1119,26 @@ export default function ProductSelectPage() {
                 <Form
                   form={objectForm}
                   layout="inline"
-                  initialValues={{ include_test: false, limit: 100, offset: 0 }}
+                  initialValues={{}}
+                  onValuesChange={handleObjectFilterChange}
                   onFinish={loadObjects}
                   style={{ rowGap: 12, marginBottom: 16 }}
                 >
                   <Form.Item label="潜力" name="potential">
                     <Select style={{ width: 160 }} allowClear options={POTENTIAL_OPTIONS} />
                   </Form.Item>
-                  <Form.Item label="关联 IP" name="related_ip">
-                    <Input placeholder="名人/IP" style={{ width: 160 }} allowClear />
+                  <Form.Item label="来源 IP" name="source_monitor">
+                    <Select
+                      placeholder="选择来源 IP"
+                      style={{ width: 180 }}
+                      allowClear
+                      showSearch
+                      options={sourceIpOptions}
+                      optionFilterProp="label"
+                    />
                   </Form.Item>
                   <Form.Item label="品类" name="category">
                     <Input placeholder="category" style={{ width: 160 }} allowClear />
-                  </Form.Item>
-                  <Form.Item label="测试数据" name="include_test">
-                    <Select
-                      style={{ width: 150 }}
-                      options={[
-                        { value: false, label: "不包含" },
-                        { value: true, label: "包含" },
-                      ]}
-                    />
-                  </Form.Item>
-                  <Form.Item label="数量" name="limit">
-                    <InputNumber min={1} max={500} />
-                  </Form.Item>
-                  <Form.Item label="偏移" name="offset">
-                    <InputNumber min={0} />
                   </Form.Item>
                   <Form.Item>
                     <Button htmlType="submit" loading={objectLoading}>
@@ -1150,9 +1156,9 @@ export default function ProductSelectPage() {
                   <Table
                     rowKey={(record) => record.id}
                     columns={objectColumns}
-                    dataSource={objects.items}
-                    pagination={{ pageSize: 10, showSizeChanger: true }}
-                    scroll={{ x: 1040 }}
+                    dataSource={displayedObjects}
+                    pagination={{ defaultPageSize: 6, showSizeChanger: true, pageSizeOptions: [6, 10, 20, 50] }}
+                    scroll={{ x: 1140 }}
                   />
                 )}
               </Card>
@@ -1161,13 +1167,13 @@ export default function ProductSelectPage() {
                 items={[
                   {
                     key: "advanced",
-                    label: "高级工具（文件汇总 / 手动商品匹配测试）",
+                    label: "高级工具（文件汇总 / 手动相似商品测试）",
                     children: (
                       <Space direction="vertical" size="middle" style={{ width: "100%" }}>
                         <Alert
                           type="warning"
                           showIcon
-                          message="这里是调试和补数据工具。日常使用优先在「数据库商品机会」列表里查看商品匹配。"
+                          message="这里是调试和补数据工具。日常使用优先在「数据库商品机会」列表里查看相似商品。"
                         />
                         <Card
                           title="生成文件汇总"
@@ -1243,7 +1249,7 @@ export default function ProductSelectPage() {
                           )}
                         </Card>
 
-                        <Card title="手动商品匹配测试">
+                        <Card title="手动相似商品测试">
                           <Form
                             form={supplyForm}
                             layout="vertical"
@@ -1267,7 +1273,7 @@ export default function ProductSelectPage() {
                             </Space>
                             <div>
                               <Button type="primary" onClick={runSupplyTest} loading={supplySubmitting}>
-                                开始商品匹配测试
+                                开始相似商品测试
                               </Button>
                             </div>
                           </Form>
@@ -1335,7 +1341,7 @@ export default function ProductSelectPage() {
         </Form>
       </Modal>
       <Modal
-        title={`商品匹配：${selectedObject?.category || selectedObject?.id || ""}`}
+        title={`相似商品：${selectedObject?.category || selectedObject?.id || ""}`}
         open={matchModalOpen}
         onCancel={() => setMatchModalOpen(false)}
         footer={null}
@@ -1346,10 +1352,19 @@ export default function ProductSelectPage() {
           <Alert
             type="info"
             showIcon
-            message={`当前商品机会 ID：${formatMaybe(selectedObject?.id)}，来源 IP/账号：${formatMaybe(
+            message={`当前商品机会 ID：${formatMaybe(selectedObject?.id)}，来源 IP：${formatMaybe(
               getSourceMonitorName(selectedObject),
-            )}，关联 IP：${formatMaybe(selectedObject?.related_ip)}，仅展示前三个匹配商品`}
+            )}，识别 IP：${formatMaybe(selectedObject?.related_ip)}，仅展示前三个相似商品`}
           />
+          <div>
+            <Button
+              type="primary"
+              loading={supplyMatchObjectId === selectedObject?.id}
+              onClick={() => loadObjectProductMatches(selectedObject, true)}
+            >
+              刷新相似商品
+            </Button>
+          </div>
           <Table
             rowKey={(record, index) => record.id || getMatchUrl(record) || `${record.title || "match"}-${index}`}
             columns={matchColumns}
@@ -1361,7 +1376,7 @@ export default function ProductSelectPage() {
         </Space>
       </Modal>
       <Modal
-        title={`商品匹配详情：${selectedSupplyItem?.category || "对应商品"}`}
+        title={`相似商品详情：${selectedSupplyItem?.category || "对应商品"}`}
         open={supplyMatchModalOpen}
         onCancel={() => setSupplyMatchModalOpen(false)}
         footer={null}
@@ -1372,7 +1387,7 @@ export default function ProductSelectPage() {
           <Alert
             type="info"
             showIcon
-            message={`关联 IP：${formatMaybe(selectedSupplyItem?.related_ip)}，潜力：${formatMaybe(
+            message={`来源 IP：${formatMaybe(selectedSupplyItem?.related_ip)}，潜力：${formatMaybe(
               selectedSupplyItem?.ecommerce_potential,
             )}，来源图片：${formatMaybe(selectedSupplyItem?.source_image)}`}
           />
