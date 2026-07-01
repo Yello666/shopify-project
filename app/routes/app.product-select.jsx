@@ -103,13 +103,13 @@ export default function ProductSelectPage() {
   const navigate = useNavigate();
   const [monitorForm] = Form.useForm();
   const [monitorListForm] = Form.useForm();
-  const [monitorManageForm] = Form.useForm();
+  const [monitorEditForm] = Form.useForm();
   const [summaryForm] = Form.useForm();
   const [supplyForm] = Form.useForm();
   const [objectForm] = Form.useForm();
 
   const [monitorListLoading, setMonitorListLoading] = useState(false);
-  const [monitorSaving, setMonitorSaving] = useState(false);
+  const [monitorUpdating, setMonitorUpdating] = useState(false);
   const [monitorSubmitting, setMonitorSubmitting] = useState(false);
   const [aggregateSubmitting, setAggregateSubmitting] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -118,8 +118,11 @@ export default function ProductSelectPage() {
   const [supplyMatchObjectId, setSupplyMatchObjectId] = useState(null);
 
   const [monitors, setMonitors] = useState({ items: [], returned_count: 0 });
+  const [selectedMonitors, setSelectedMonitors] = useState([]);
   const [monitorListError, setMonitorListError] = useState("");
   const [monitorResult, setMonitorResult] = useState(null);
+  const [editingMonitor, setEditingMonitor] = useState(null);
+  const [monitorEditOpen, setMonitorEditOpen] = useState(false);
   const [aggregateResult, setAggregateResult] = useState(null);
   const [summary, setSummary] = useState({ stats: {}, rows: [], returned_count: 0 });
   const [summaryError, setSummaryError] = useState("");
@@ -290,19 +293,22 @@ export default function ProductSelectPage() {
     loadObjects();
   }, [loadObjects]);
 
-  const runInstagramMonitor = async () => {
+  const runMonitorPool = async () => {
     try {
       const values = await monitorForm.validateFields();
+      if (!selectedMonitors.length) {
+        message.warning("请先从监控池填入本次监控对象");
+        return;
+      }
       setMonitorSubmitting(true);
       const payload = {
-        profiles: parseLines(values.profiles),
+        monitor_ids: selectedMonitors.map((item) => item.id),
         posts_per_profile: values.posts_per_profile || 3,
         max_images_per_post: values.max_images_per_post || 4,
         force: Boolean(values.force),
       };
-      if (!payload.profiles.length) payload.profiles = null;
 
-      const res = await authFetch(`${PRODUCT_SELECT_BASE}/instagram/run`, {
+      const res = await authFetch(`${PRODUCT_SELECT_BASE}/monitors/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -310,49 +316,21 @@ export default function ProductSelectPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = json?.detail || json?.message || `执行失败: ${res.status}`;
-        throw new Error(typeof detail === "string" ? detail : "Instagram 监控失败");
+        throw new Error(typeof detail === "string" ? detail : "IP 监控失败");
       }
       const data = pickResponseData(json);
       setMonitorResult(data);
-      message.success("Instagram 监控完成");
+      if (Array.isArray(data?.unsupported_monitors) && data.unsupported_monitors.length) {
+        message.warning(`监控完成，${data.unsupported_monitors.length} 个非 Instagram 对象暂不支持运行`);
+      } else {
+        message.success("IP 监控完成");
+      }
       loadObjects();
     } catch (e) {
       if (e?.errorFields) return;
-      message.error(e instanceof Error ? e.message : "Instagram 监控失败");
+      message.error(e instanceof Error ? e.message : "IP 监控失败");
     } finally {
       setMonitorSubmitting(false);
-    }
-  };
-
-  const saveMonitor = async () => {
-    try {
-      const values = await monitorManageForm.validateFields();
-      setMonitorSaving(true);
-      const res = await authFetch(`${PRODUCT_SELECT_BASE}/monitors`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          platform: values.platform || "instagram",
-          handle: values.handle?.trim(),
-          display_name: values.display_name?.trim() || null,
-          monitor_type: values.monitor_type || "profile",
-          score: values.score ?? 5,
-          is_enabled: values.is_enabled ?? true,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detail = json?.detail || json?.message || `保存失败: ${res.status}`;
-        throw new Error(typeof detail === "string" ? detail : "监控账号保存失败");
-      }
-      message.success("监控账号已保存");
-      monitorManageForm.setFieldsValue({ handle: "", display_name: "" });
-      loadMonitors();
-    } catch (e) {
-      if (e?.errorFields) return;
-      message.error(e instanceof Error ? e.message : "监控账号保存失败");
-    } finally {
-      setMonitorSaving(false);
     }
   };
 
@@ -370,37 +348,78 @@ export default function ProductSelectPage() {
       }
       message.success("监控账号已更新");
       loadMonitors();
+      return true;
     } catch (e) {
       message.error(e instanceof Error ? e.message : "监控账号更新失败");
+      return false;
     }
   };
 
-  const disableMonitor = async (record) => {
-    try {
-      const res = await authFetch(`${PRODUCT_SELECT_BASE}/monitors/${record.id}`, { method: "DELETE" });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detail = json?.detail || json?.message || `停用失败: ${res.status}`;
-        throw new Error(typeof detail === "string" ? detail : "监控账号停用失败");
-      }
-      message.success("监控账号已停用");
-      loadMonitors();
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : "监控账号停用失败");
-    }
-  };
-
-  const useEnabledMonitorsForInstagram = () => {
-    const enabledInstagramHandles = monitors.items
-      .filter((item) => item.is_enabled && item.platform === "instagram")
-      .map((item) => item.handle)
-      .filter(Boolean);
-    if (!enabledInstagramHandles.length) {
-      message.warning("暂无启用的 Instagram 监控账号");
+  const addMonitorToRun = (record) => {
+    if (!record?.is_enabled) {
+      message.warning("停用的监控对象不能加入本次任务");
       return;
     }
-    monitorForm.setFieldsValue({ profiles: enabledInstagramHandles.join("\n") });
-    message.success(`已填入 ${enabledInstagramHandles.length} 个启用账号`);
+    setSelectedMonitors((current) => {
+      if (current.some((item) => item.id === record.id)) return current;
+      return [...current, record];
+    });
+  };
+
+  const addEnabledMonitorsToRun = () => {
+    const enabledMonitors = monitors.items.filter((item) => item.is_enabled);
+    if (!enabledMonitors.length) {
+      message.warning("暂无启用的监控对象");
+      return;
+    }
+    setSelectedMonitors((current) => {
+      const existingIds = new Set(current.map((item) => item.id));
+      return [...current, ...enabledMonitors.filter((item) => !existingIds.has(item.id))];
+    });
+    message.success(`已填入 ${enabledMonitors.length} 个启用监控对象`);
+  };
+
+  const removeSelectedMonitor = (monitorId) => {
+    setSelectedMonitors((current) => current.filter((item) => item.id !== monitorId));
+  };
+
+  const openMonitorEdit = (record) => {
+    setEditingMonitor(record);
+    monitorEditForm.setFieldsValue({
+      display_name: record.display_name,
+      score: record.score,
+      is_enabled: record.is_enabled,
+    });
+    setMonitorEditOpen(true);
+  };
+
+  const saveMonitorEdit = async () => {
+    if (!editingMonitor?.id) return;
+    try {
+      const values = await monitorEditForm.validateFields();
+      setMonitorUpdating(true);
+      const ok = await updateMonitor(editingMonitor, {
+        display_name: values.display_name?.trim() || null,
+        score: values.score,
+        is_enabled: values.is_enabled,
+      });
+      if (!ok) return;
+      setSelectedMonitors((current) =>
+        current
+          .map((item) =>
+            item.id === editingMonitor.id
+              ? { ...item, display_name: values.display_name?.trim() || null, score: values.score, is_enabled: values.is_enabled }
+              : item,
+          )
+          .filter((item) => item.is_enabled),
+      );
+      setMonitorEditOpen(false);
+      setEditingMonitor(null);
+    } catch (e) {
+      if (e?.errorFields) return;
+    } finally {
+      setMonitorUpdating(false);
+    }
   };
 
   const runAggregate = async () => {
@@ -587,38 +606,22 @@ export default function ProductSelectPage() {
     {
       title: "操作",
       key: "action",
-      width: 220,
+      width: 150,
       render: (_, record) => (
-        <Space size="small" wrap>
+        <Space direction="vertical" size={2}>
           <Button
             type="link"
             style={{ padding: 0 }}
-            onClick={() =>
-              updateMonitor(record, {
-                is_enabled: !record.is_enabled,
-              })
-            }
+            onClick={() => openMonitorEdit(record)}
           >
-            {record.is_enabled ? "停用" : "启用"}
+            编辑
           </Button>
           <Button
             type="link"
             style={{ padding: 0 }}
-            onClick={() => {
-              monitorManageForm.setFieldsValue({
-                platform: record.platform,
-                handle: record.handle,
-                display_name: record.display_name,
-                monitor_type: record.monitor_type,
-                score: record.score,
-                is_enabled: record.is_enabled,
-              });
-            }}
+            onClick={() => addMonitorToRun(record)}
           >
-            填入表单
-          </Button>
-          <Button type="link" danger style={{ padding: 0 }} onClick={() => disableMonitor(record)}>
-            删除/停用
+            填入监控表单
           </Button>
         </Space>
       ),
@@ -976,67 +979,7 @@ export default function ProductSelectPage() {
         <s-section heading="社媒趋势选品工作台">
           <div className="dash-shell dash-section-inner">
             <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-              <Alert
-                type="info"
-                showIcon
-                message="从 Instagram 内容识别潜在商品，再聚合为选品总表，并可对图片做商品匹配验证。"
-              />
-
-              <Card title="1. 监控账号管理">
-                <Form
-                  form={monitorManageForm}
-                  layout="inline"
-                  initialValues={{
-                    platform: "instagram",
-                    monitor_type: "profile",
-                    score: 5,
-                    is_enabled: true,
-                  }}
-                  style={{ rowGap: 12, marginBottom: 16 }}
-                >
-                  <Form.Item label="平台" name="platform">
-                    <Input placeholder="instagram" style={{ width: 140 }} />
-                  </Form.Item>
-                  <Form.Item
-                    label="账号/频道"
-                    name="handle"
-                    rules={[{ required: true, message: "请填写账号/频道" }]}
-                  >
-                    <Input placeholder="kendalljenner" style={{ width: 180 }} />
-                  </Form.Item>
-                  <Form.Item label="显示名称" name="display_name">
-                    <Input placeholder="可选" style={{ width: 160 }} allowClear />
-                  </Form.Item>
-                  <Form.Item label="类型" name="monitor_type">
-                    <Select
-                      style={{ width: 140 }}
-                      options={[
-                        { value: "profile", label: "profile" },
-                        { value: "channel", label: "channel" },
-                        { value: "keyword", label: "keyword" },
-                        { value: "hashtag", label: "hashtag" },
-                      ]}
-                    />
-                  </Form.Item>
-                  <Form.Item label="评分" name="score">
-                    <InputNumber min={0} max={10} step={0.5} />
-                  </Form.Item>
-                  <Form.Item label="状态" name="is_enabled">
-                    <Select
-                      style={{ width: 110 }}
-                      options={[
-                        { value: true, label: "启用" },
-                        { value: false, label: "停用" },
-                      ]}
-                    />
-                  </Form.Item>
-                  <Form.Item>
-                    <Button type="primary" onClick={saveMonitor} loading={monitorSaving}>
-                      保存账号
-                    </Button>
-                  </Form.Item>
-                </Form>
-
+              <Card title="1. IP 监控池">
                 <Form
                   form={monitorListForm}
                   layout="inline"
@@ -1066,8 +1009,8 @@ export default function ProductSelectPage() {
                       <Button htmlType="submit" loading={monitorListLoading}>
                         查询
                       </Button>
-                      <Button onClick={useEnabledMonitorsForInstagram}>
-                        填入启用 Instagram 账号
+                      <Button onClick={addEnabledMonitorsToRun}>
+                        填入全部启用对象
                       </Button>
                     </Space>
                   </Form.Item>
@@ -1084,24 +1027,43 @@ export default function ProductSelectPage() {
                     rowKey={(record) => record.id}
                     columns={monitorColumns}
                     dataSource={monitors.items}
-                    pagination={{ pageSize: 8, showSizeChanger: true }}
+                    pagination={{ pageSize: 5, showSizeChanger: true }}
                     scroll={{ x: 900 }}
                   />
                 )}
               </Card>
 
-              <Card title="2. Instagram 名人监控">
+              <Card title="2. IP 监控">
                 <Form
                   form={monitorForm}
                   layout="vertical"
                   initialValues={{ posts_per_profile: 3, max_images_per_post: 4, force: false }}
                 >
-                  <Form.Item
-                    label="Instagram 账号"
-                    name="profiles"
-                    extra="可留空使用后端默认账号；多个账号可换行或用逗号分隔。"
-                  >
-                    <Input.TextArea rows={3} placeholder="例如：kendalljenner&#10;haileybieber" />
+                  <Form.Item label="本次监控对象" extra="点击监控池列表里的「填入监控表单」加入；点击标签上的 x 仅从本次任务移除。">
+                    <div
+                      style={{
+                        minHeight: 76,
+                        border: "1px solid #d9d9d9",
+                        borderRadius: 8,
+                        padding: 12,
+                        background: "#fff",
+                      }}
+                    >
+                      {selectedMonitors.length ? (
+                        <Space size={[8, 8]} wrap>
+                          {selectedMonitors.map((item) => (
+                            <Tag key={item.id} closable onClose={() => removeSelectedMonitor(item.id)}>
+                              {item.display_name || item.handle}
+                              <span style={{ color: "var(--dash-muted)", marginLeft: 6 }}>
+                                {item.platform} · {item.score ?? "—"}分
+                              </span>
+                            </Tag>
+                          ))}
+                        </Space>
+                      ) : (
+                        <span style={{ color: "var(--dash-muted)" }}>暂无本次监控对象</span>
+                      )}
+                    </div>
                   </Form.Item>
                   <Space size="middle" wrap>
                     <Form.Item label="每个账号抓取帖子数" name="posts_per_profile">
@@ -1121,7 +1083,7 @@ export default function ProductSelectPage() {
                     </Form.Item>
                   </Space>
                   <div>
-                    <Button type="primary" onClick={runInstagramMonitor} loading={monitorSubmitting}>
+                    <Button type="primary" onClick={runMonitorPool} loading={monitorSubmitting}>
                       开始监控
                     </Button>
                   </div>
@@ -1134,6 +1096,7 @@ export default function ProductSelectPage() {
                       <Statistic title="跳过" value={monitorResult.skipped_posts || 0} />
                       <Statistic title="失败" value={monitorResult.failed_posts || 0} />
                       <Statistic title="识别对象" value={monitorResult.object_total || 0} />
+                      <Statistic title="暂不支持" value={monitorResult.unsupported_monitors?.length || 0} />
                     </Space>
                   </div>
                 ) : null}
@@ -1320,7 +1283,7 @@ export default function ProductSelectPage() {
                                   rowKey={(record) => record._rowKey}
                                   columns={supplyItemColumns}
                                   dataSource={supplyItems}
-                                  pagination={{ pageSize: 8, showSizeChanger: true }}
+                                  pagination={{ pageSize: 5, showSizeChanger: true }}
                                   scroll={{ x: 980 }}
                                 />
                               ) : (
@@ -1338,6 +1301,39 @@ export default function ProductSelectPage() {
           </div>
         </s-section>
       </s-page>
+      <Modal
+        title={`编辑监控对象：${editingMonitor?.display_name || editingMonitor?.handle || ""}`}
+        open={monitorEditOpen}
+        onCancel={() => {
+          setMonitorEditOpen(false);
+          setEditingMonitor(null);
+        }}
+        onOk={saveMonitorEdit}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={monitorUpdating}
+        destroyOnHidden
+      >
+        <Form form={monitorEditForm} layout="vertical">
+          <Form.Item label="账号">
+            <Input value={editingMonitor ? `${editingMonitor.platform} / ${editingMonitor.handle}` : ""} disabled />
+          </Form.Item>
+          <Form.Item label="显示名称" name="display_name">
+            <Input placeholder="例如：NiKo" allowClear />
+          </Form.Item>
+          <Form.Item label="评分" name="score">
+            <InputNumber min={0} max={10} step={0.5} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item label="状态" name="is_enabled">
+            <Select
+              options={[
+                { value: true, label: "启用" },
+                { value: false, label: "停用" },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
       <Modal
         title={`商品匹配：${selectedObject?.category || selectedObject?.id || ""}`}
         open={matchModalOpen}
