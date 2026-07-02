@@ -6,7 +6,6 @@ import {
   Alert,
   Button,
   Card,
-  Collapse,
   Empty,
   Form,
   Input,
@@ -30,22 +29,8 @@ const POTENTIAL_OPTIONS = [
   { value: "low", label: "low 低潜力" },
 ];
 
-const LENS_TYPE_OPTIONS = [
-  { value: "products", label: "products 商品" },
-  { value: "visual_matches", label: "visual_matches 视觉相似" },
-  { value: "exact_matches", label: "exact_matches 精确匹配" },
-  { value: "all", label: "all 全部" },
-];
-
 function pickResponseData(json) {
   return json?.data && typeof json.data === "object" ? json.data : json;
-}
-
-function parseLines(value) {
-  return String(value || "")
-    .split(/[\n,，]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function formatMaybe(value) {
@@ -100,16 +85,11 @@ export default function ProductSelectPage() {
   const [monitorForm] = Form.useForm();
   const [monitorListForm] = Form.useForm();
   const [monitorEditForm] = Form.useForm();
-  const [summaryForm] = Form.useForm();
-  const [supplyForm] = Form.useForm();
   const [objectForm] = Form.useForm();
 
   const [monitorListLoading, setMonitorListLoading] = useState(false);
   const [monitorUpdating, setMonitorUpdating] = useState(false);
   const [monitorSubmitting, setMonitorSubmitting] = useState(false);
-  const [aggregateSubmitting, setAggregateSubmitting] = useState(false);
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [supplySubmitting, setSupplySubmitting] = useState(false);
   const [objectLoading, setObjectLoading] = useState(false);
   const [supplyMatchObjectId, setSupplyMatchObjectId] = useState(null);
 
@@ -119,18 +99,12 @@ export default function ProductSelectPage() {
   const [monitorResult, setMonitorResult] = useState(null);
   const [editingMonitor, setEditingMonitor] = useState(null);
   const [monitorEditOpen, setMonitorEditOpen] = useState(false);
-  const [aggregateResult, setAggregateResult] = useState(null);
-  const [summary, setSummary] = useState({ stats: {}, rows: [], returned_count: 0 });
-  const [summaryError, setSummaryError] = useState("");
-  const [supplyResult, setSupplyResult] = useState(null);
   const [objects, setObjects] = useState({ items: [], returned_count: 0 });
   const [objectFilters, setObjectFilters] = useState({});
   const [objectError, setObjectError] = useState("");
   const [matches, setMatches] = useState({ items: [], returned_count: 0 });
   const [selectedObject, setSelectedObject] = useState(null);
   const [matchModalOpen, setMatchModalOpen] = useState(false);
-  const [selectedSupplyItem, setSelectedSupplyItem] = useState(null);
-  const [supplyMatchModalOpen, setSupplyMatchModalOpen] = useState(false);
 
   const loadMonitors = useCallback(
     async (values = monitorListForm.getFieldsValue()) => {
@@ -164,40 +138,6 @@ export default function ProductSelectPage() {
       }
     },
     [monitorListForm],
-  );
-
-  const loadSummary = useCallback(
-    async (values = summaryForm.getFieldsValue()) => {
-      setSummaryLoading(true);
-      setSummaryError("");
-      try {
-        const params = new URLSearchParams();
-        if (values.platform) params.set("platform", values.platform.trim());
-        if (values.account) params.set("account", values.account.trim());
-        if (values.potential) params.set("potential", values.potential);
-        params.set("limit", String(values.limit || 200));
-
-        const res = await authFetch(`${PRODUCT_SELECT_BASE}/summary?${params.toString()}`);
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const detail = json?.detail || json?.message || `获取失败: ${res.status}`;
-          throw new Error(typeof detail === "string" ? detail : "选品汇总加载失败");
-        }
-        const data = pickResponseData(json);
-        setSummary({
-          stats: data?.stats || {},
-          rows: Array.isArray(data?.rows) ? data.rows : [],
-          returned_count: Number(data?.returned_count) || 0,
-        });
-      } catch (e) {
-        const detail = e instanceof Error ? e.message : "选品汇总加载失败";
-        setSummaryError(detail);
-        setSummary({ stats: {}, rows: [], returned_count: 0 });
-      } finally {
-        setSummaryLoading(false);
-      }
-    },
-    [summaryForm],
   );
 
   const loadObjects = useCallback(
@@ -282,10 +222,6 @@ export default function ProductSelectPage() {
   useEffect(() => {
     loadMonitors();
   }, [loadMonitors]);
-
-  useEffect(() => {
-    loadSummary();
-  }, [loadSummary]);
 
   useEffect(() => {
     loadObjects();
@@ -428,80 +364,6 @@ export default function ProductSelectPage() {
     }
   };
 
-  const runAggregate = async () => {
-    setAggregateSubmitting(true);
-    try {
-      const res = await authFetch(`${PRODUCT_SELECT_BASE}/aggregate/run`, { method: "POST" });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detail = json?.detail || json?.message || `聚合失败: ${res.status}`;
-        throw new Error(typeof detail === "string" ? detail : "选品聚合失败");
-      }
-      const data = pickResponseData(json);
-      setAggregateResult(data);
-      message.success("选品汇总已生成");
-      loadSummary();
-      loadObjects();
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : "选品聚合失败");
-    } finally {
-      setAggregateSubmitting(false);
-    }
-  };
-
-  const runSupplyTest = async () => {
-    try {
-      const values = await supplyForm.validateFields();
-      const images = parseLines(values.images);
-      if (!images.length) {
-        message.warning("请至少填写一张图片路径");
-        return;
-      }
-      setSupplySubmitting(true);
-      const res = await authFetch(`${PRODUCT_SELECT_BASE}/supply/test`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          images,
-          potential_filter: values.potential_filter || [],
-          lens_type: values.lens_type || "products",
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detail = json?.detail || json?.message || `测试失败: ${res.status}`;
-        throw new Error(typeof detail === "string" ? detail : "相似商品测试失败");
-      }
-      setSupplyResult(pickResponseData(json));
-      message.success("相似商品测试完成");
-    } catch (e) {
-      if (e?.errorFields) return;
-      message.error(e instanceof Error ? e.message : "相似商品测试失败");
-    } finally {
-      setSupplySubmitting(false);
-    }
-  };
-
-  const statEntries = useMemo(() => {
-    const stats = summary?.stats || {};
-    return Object.entries(stats).slice(0, 8);
-  }, [summary]);
-
-  const supplyItems = useMemo(() => {
-    const results = Array.isArray(supplyResult?.results) ? supplyResult.results : [];
-    return results.flatMap((result, resultIndex) => {
-      const items = Array.isArray(result?.items) ? result.items : [];
-      return items.map((item, itemIndex) => ({
-        ...item,
-        _rowKey: `${result?.source_image || "image"}-${resultIndex}-${itemIndex}`,
-        source_image: result?.source_image,
-        detected_count: result?.detected_count,
-        queried_count: result?.queried_count,
-        result_path: result?.result_path,
-      }));
-    });
-  }, [supplyResult]);
-
   const sourceIpOptions = useMemo(() => {
     const values = new Set();
     for (const item of objects.items) {
@@ -520,70 +382,6 @@ export default function ProductSelectPage() {
       return true;
     });
   }, [objectFilters.potential, objectFilters.source_monitor, objects.items]);
-
-  const columns = [
-    {
-      title: "选品/对象",
-      key: "name",
-      render: (_, record) => (
-        <div>
-          <div style={{ fontWeight: 600 }}>
-            {record.product_name || record.object_name || record.name || record.label || "未命名选品"}
-          </div>
-          <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
-            {formatMaybe(record.category || record.product_type || record.object_type)}
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: "来源",
-      key: "source",
-      width: 220,
-      render: (_, record) => (
-        <div>
-          <div>{formatMaybe(record.platform)}</div>
-          <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
-            {formatMaybe(record.account || record.username || record.channel)}
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: "潜力",
-      dataIndex: "ecommerce_potential",
-      key: "potential",
-      width: 120,
-      render: potentialTag,
-    },
-    {
-      title: "理由/说明",
-      key: "reason",
-      ellipsis: true,
-      render: (_, record) =>
-        formatMaybe(record.reason || record.evidence || record.description || record.caption),
-    },
-    {
-      title: "链接",
-      key: "link",
-      width: 120,
-      render: (_, record) => {
-        const url = record.post_url || record.source_url || record.url;
-        return url ? (
-          <a href={url} target="_blank" rel="noopener noreferrer">
-            查看来源
-          </a>
-        ) : (
-          "—"
-        );
-      },
-    },
-  ];
-
-  const openSupplyMatches = (record) => {
-    setSelectedSupplyItem(record);
-    setSupplyMatchModalOpen(true);
-  };
 
   const monitorColumns = [
     {
@@ -834,152 +632,6 @@ export default function ProductSelectPage() {
     },
   ];
 
-  const supplyItemColumns = [
-    {
-      title: "对应商品",
-      key: "product",
-      render: (_, record) => (
-        <div>
-          <div style={{ fontWeight: 600 }}>{record.category || "未分类商品"}</div>
-          <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
-            来源 IP：{formatMaybe(record.related_ip)}
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: "潜力",
-      dataIndex: "ecommerce_potential",
-      key: "potential",
-      width: 120,
-      render: potentialTag,
-    },
-    {
-      title: "图片/裁剪",
-      key: "image",
-      width: 260,
-      render: (_, record) => (
-        <Space direction="vertical" size={2}>
-          <span style={{ color: "var(--dash-muted)", fontSize: 12 }}>
-            原图：{formatMaybe(record.source_image)}
-          </span>
-          <span style={{ color: "var(--dash-muted)", fontSize: 12 }}>
-            裁剪：{formatMaybe(record.crop_path)}
-          </span>
-        </Space>
-      ),
-    },
-    {
-      title: "搜索图",
-      key: "oss",
-      width: 110,
-      render: (_, record) =>
-        record.oss_url ? (
-          <a href={record.oss_url} target="_blank" rel="noopener noreferrer">
-            打开图片
-          </a>
-        ) : (
-          "—"
-        ),
-    },
-    {
-      title: "匹配数",
-      key: "matches",
-      width: 100,
-      render: (_, record) => (Array.isArray(record.top_matches) ? record.top_matches.length : 0),
-    },
-    {
-      title: "状态",
-      key: "status",
-      width: 120,
-      render: (_, record) => (record.error ? <Tag color="red">{record.error}</Tag> : <Tag color="green">完成</Tag>),
-    },
-    {
-      title: "操作",
-      key: "action",
-      width: 120,
-      render: (_, record) => (
-        <Button type="link" style={{ padding: 0 }} onClick={() => openSupplyMatches(record)}>
-          查看匹配
-        </Button>
-      ),
-    },
-  ];
-
-  const supplyMatchColumns = [
-    {
-      title: "图片",
-      key: "image",
-      width: 96,
-      render: (_, record) => {
-        const image = getMatchImage(record);
-        return image ? (
-          <a href={image} target="_blank" rel="noopener noreferrer">
-            <img
-              src={image}
-              alt={record.title || "匹配商品"}
-              style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8 }}
-            />
-          </a>
-        ) : (
-          "—"
-        );
-      },
-    },
-    {
-      title: "匹配商品",
-      key: "title",
-      render: (_, record) => (
-        <div>
-          <div style={{ fontWeight: 600 }}>{record.title || "未命名商品"}</div>
-          <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>{formatMaybe(record.source)}</div>
-        </div>
-      ),
-    },
-    {
-      title: "价格",
-      key: "price",
-      width: 130,
-      render: (_, record) => formatMatchPrice(record),
-    },
-    {
-      title: "评分",
-      key: "rating",
-      width: 140,
-      render: (_, record) =>
-        record.rating == null ? "—" : `${record.rating}${record.reviews ? ` / ${record.reviews}评` : ""}`,
-    },
-    {
-      title: "排序分",
-      dataIndex: "rank_score",
-      key: "rank_score",
-      width: 100,
-      render: (value) => (value == null ? "—" : value),
-    },
-    {
-      title: "库存",
-      dataIndex: "in_stock",
-      key: "in_stock",
-      width: 100,
-      render: (value) => (value == null ? "—" : value ? <Tag color="green">有货</Tag> : <Tag>未知/无货</Tag>),
-    },
-    {
-      title: "链接",
-      key: "link",
-      width: 110,
-      render: (_, record) => {
-        const url = getMatchUrl(record);
-        return url ? (
-          <a href={url} target="_blank" rel="noopener noreferrer">
-            打开链接
-          </a>
-        ) : (
-          "—"
-        );
-      },
-    },
-  ];
-
   return (
     <>
       <button className="dash-back-btn" onClick={() => navigate("/app")} type="button" aria-label="返回">
@@ -1040,7 +692,7 @@ export default function ProductSelectPage() {
                     rowKey={(record) => record.id}
                     columns={monitorColumns}
                     dataSource={monitors.items}
-                    pagination={{ defaultPageSize: 6, showSizeChanger: true, pageSizeOptions: [6, 10, 20, 50] }}
+                    pagination={{ defaultPageSize: 5, showSizeChanger: true, pageSizeOptions: [5, 6, 10, 20, 50] }}
                     scroll={{ x: 900 }}
                   />
                 )}
@@ -1163,146 +815,6 @@ export default function ProductSelectPage() {
                 )}
               </Card>
 
-              <Collapse
-                items={[
-                  {
-                    key: "advanced",
-                    label: "高级工具（文件汇总 / 手动相似商品测试）",
-                    children: (
-                      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-                        <Alert
-                          type="warning"
-                          showIcon
-                          message="这里是调试和补数据工具。日常使用优先在「数据库商品机会」列表里查看相似商品。"
-                        />
-                        <Card
-                          title="生成文件汇总"
-                          extra={
-                            <Button type="primary" onClick={runAggregate} loading={aggregateSubmitting}>
-                              生成汇总
-                            </Button>
-                          }
-                        >
-                          {aggregateResult ? (
-                            <Space direction="vertical" size={4}>
-                              <div>summary.json：{formatMaybe(aggregateResult.summary_json)}</div>
-                              <div>summary.csv：{formatMaybe(aggregateResult.summary_csv)}</div>
-                            </Space>
-                          ) : (
-                            <span style={{ color: "var(--dash-muted)" }}>
-                              聚合识别结果后，下面的文件选品总表会自动刷新。
-                            </span>
-                          )}
-                        </Card>
-
-                        <Card title="文件选品总表">
-                          <Form
-                            form={summaryForm}
-                            layout="inline"
-                            initialValues={{ limit: 200 }}
-                            onFinish={loadSummary}
-                            style={{ rowGap: 12, marginBottom: 16 }}
-                          >
-                            <Form.Item label="平台" name="platform">
-                              <Input placeholder="instagram" style={{ width: 150 }} allowClear />
-                            </Form.Item>
-                            <Form.Item label="账号" name="account">
-                              <Input placeholder="账号名" style={{ width: 150 }} allowClear />
-                            </Form.Item>
-                            <Form.Item label="潜力" name="potential">
-                              <Select style={{ width: 160 }} allowClear options={POTENTIAL_OPTIONS} />
-                            </Form.Item>
-                            <Form.Item label="数量" name="limit">
-                              <InputNumber min={1} max={2000} />
-                            </Form.Item>
-                            <Form.Item>
-                              <Button htmlType="submit" loading={summaryLoading}>
-                                查询
-                              </Button>
-                            </Form.Item>
-                          </Form>
-
-                          {statEntries.length ? (
-                            <Space wrap size="large" style={{ marginBottom: 16 }}>
-                              {statEntries.map(([key, value]) => (
-                                <Statistic key={key} title={key} value={formatMaybe(value)} />
-                              ))}
-                            </Space>
-                          ) : null}
-
-                          {summaryLoading ? (
-                            <div className="dash-page-loading">
-                              <Spin size="large" />
-                            </div>
-                          ) : summaryError ? (
-                            <Empty description={summaryError} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                          ) : (
-                            <Table
-                              rowKey={(record, index) =>
-                                record.id || record.product_id || record.post_id || `${record.account || "row"}-${index}`
-                              }
-                              columns={columns}
-                              dataSource={summary.rows}
-                              pagination={{ pageSize: 10, showSizeChanger: true }}
-                              scroll={{ x: 900 }}
-                            />
-                          )}
-                        </Card>
-
-                        <Card title="手动相似商品测试">
-                          <Form
-                            form={supplyForm}
-                            layout="vertical"
-                            initialValues={{ potential_filter: ["high"], lens_type: "products" }}
-                          >
-                            <Form.Item
-                              label="图片路径"
-                              name="images"
-                              rules={[{ required: true, message: "请填写图片路径" }]}
-                              extra="仅用于调试单张图片，不写入数据库；多张图片可换行或用逗号分隔。"
-                            >
-                              <Input.TextArea rows={3} placeholder="例如：data/productSelect/instagram/user/post/image.jpg" />
-                            </Form.Item>
-                            <Space size="middle" wrap>
-                              <Form.Item label="潜力过滤" name="potential_filter">
-                                <Select mode="multiple" style={{ minWidth: 220 }} options={POTENTIAL_OPTIONS} />
-                              </Form.Item>
-                              <Form.Item label="Lens 类型" name="lens_type">
-                                <Select style={{ width: 220 }} options={LENS_TYPE_OPTIONS} />
-                              </Form.Item>
-                            </Space>
-                            <div>
-                              <Button type="primary" onClick={runSupplyTest} loading={supplySubmitting}>
-                                开始相似商品测试
-                              </Button>
-                            </div>
-                          </Form>
-                          {supplyResult ? (
-                            <div style={{ marginTop: 16 }}>
-                              <Space wrap size="large" style={{ marginBottom: 16 }}>
-                                <Statistic title="成功图片" value={supplyResult.processed_images || 0} />
-                                <Statistic title="失败图片" value={supplyResult.failed_images || 0} />
-                                <Statistic title="对应商品" value={supplyItems.length} />
-                              </Space>
-                              {supplyItems.length ? (
-                                <Table
-                                  rowKey={(record) => record._rowKey}
-                                  columns={supplyItemColumns}
-                                  dataSource={supplyItems}
-                                  pagination={{ pageSize: 5, showSizeChanger: true }}
-                                  scroll={{ x: 980 }}
-                                />
-                              ) : (
-                                <Empty description="暂无对应商品结果" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                              )}
-                            </div>
-                          ) : null}
-                        </Card>
-                      </Space>
-                    ),
-                  },
-                ]}
-              />
             </Space>
           </div>
         </s-section>
@@ -1372,53 +884,6 @@ export default function ProductSelectPage() {
             loading={supplyMatchObjectId != null}
             pagination={false}
             scroll={{ x: 860 }}
-          />
-        </Space>
-      </Modal>
-      <Modal
-        title={`相似商品详情：${selectedSupplyItem?.category || "对应商品"}`}
-        open={supplyMatchModalOpen}
-        onCancel={() => setSupplyMatchModalOpen(false)}
-        footer={null}
-        width={1020}
-        destroyOnHidden
-      >
-        <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-          <Alert
-            type="info"
-            showIcon
-            message={`来源 IP：${formatMaybe(selectedSupplyItem?.related_ip)}，潜力：${formatMaybe(
-              selectedSupplyItem?.ecommerce_potential,
-            )}，来源图片：${formatMaybe(selectedSupplyItem?.source_image)}`}
-          />
-          <Space direction="vertical" size={4}>
-            <div>
-              <strong>裁剪图片：</strong>
-              {formatMaybe(selectedSupplyItem?.crop_path)}
-            </div>
-            <div>
-              <strong>OSS 图片：</strong>
-              {selectedSupplyItem?.oss_url ? (
-                <a href={selectedSupplyItem.oss_url} target="_blank" rel="noopener noreferrer">
-                  打开搜索图片
-                </a>
-              ) : (
-                "—"
-              )}
-            </div>
-            {selectedSupplyItem?.error ? (
-              <div>
-                <strong>错误：</strong>
-                <Tag color="red">{selectedSupplyItem.error}</Tag>
-              </div>
-            ) : null}
-          </Space>
-          <Table
-            rowKey={(record, index) => getMatchUrl(record) || `${record.title || "match"}-${index}`}
-            columns={supplyMatchColumns}
-            dataSource={Array.isArray(selectedSupplyItem?.top_matches) ? selectedSupplyItem.top_matches : []}
-            pagination={{ pageSize: 6, showSizeChanger: true }}
-            scroll={{ x: 920 }}
           />
         </Space>
       </Modal>
