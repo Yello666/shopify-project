@@ -147,6 +147,7 @@ export default function ProductSelectPage() {
       try {
         const params = new URLSearchParams();
         if (values.category) params.set("category", values.category.trim());
+        if (values.include_inactive) params.set("include_inactive", "true");
         params.set("limit", "500");
         params.set("offset", "0");
 
@@ -219,6 +220,30 @@ export default function ProductSelectPage() {
     }
   };
 
+  const deleteObjectOpportunity = async (record) => {
+    if (!record?.id) return;
+    Modal.confirm({
+      title: "删除商品机会",
+      content: `确认删除「${record.category || record.id}」吗？删除后默认列表将不再显示。`,
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      async onOk() {
+        const res = await authFetch(`${PRODUCT_SELECT_BASE}/objects/${record.id}`, { method: "DELETE" });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const detail = json?.detail || json?.message || `删除失败: ${res.status}`;
+          throw new Error(typeof detail === "string" ? detail : "商品机会删除失败");
+        }
+        setObjects((current) => ({
+          items: current.items.filter((item) => item.id !== record.id),
+          returned_count: Math.max(0, (Number(current.returned_count) || 0) - 1),
+        }));
+        message.success("商品机会已删除");
+      },
+    });
+  };
+
   useEffect(() => {
     loadMonitors();
   }, [loadMonitors]);
@@ -239,7 +264,6 @@ export default function ProductSelectPage() {
         monitor_ids: selectedMonitors.map((item) => item.id),
         posts_per_profile: values.posts_per_profile || 3,
         max_images_per_post: values.max_images_per_post || 4,
-        force: Boolean(values.force),
       };
 
       const res = await authFetch(`${PRODUCT_SELECT_BASE}/monitors/run`, {
@@ -375,6 +399,16 @@ export default function ProductSelectPage() {
       .map((value) => ({ value, label: value }));
   }, [objects.items]);
 
+  const categoryOptions = useMemo(() => {
+    const values = new Set();
+    for (const item of objects.items) {
+      if (item.category) values.add(String(item.category));
+    }
+    return Array.from(values)
+      .sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+      .map((value) => ({ value, label: value }));
+  }, [objects.items]);
+
   const displayedObjects = useMemo(() => {
     return objects.items.filter((item) => {
       if (objectFilters.potential && item.ecommerce_potential !== objectFilters.potential) return false;
@@ -481,6 +515,10 @@ export default function ProductSelectPage() {
             <span style={{ fontWeight: 600, whiteSpace: "normal", wordBreak: "break-word" }}>
               {record.category || "未分类商品机会"}
             </span>
+            <Tag color={record.is_active === false ? "default" : "green"}>
+              v{record.recognition_version || 1}
+              {record.is_active === false ? " 历史" : " 当前"}
+            </Tag>
             {record.is_test ? <Tag>测试</Tag> : null}
           </Space>
           <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
@@ -510,22 +548,23 @@ export default function ProductSelectPage() {
       render: potentialTag,
     },
     {
-      title: "说明",
+      title: "描述",
       key: "description",
-      width: 220,
+      width: 320,
       render: (_, record) => (
         <div style={{ fontSize: 12, whiteSpace: "normal", wordBreak: "break-word" }}>
-          {formatMaybe(record.description || record.reason)}
-        </div>
-      ),
-    },
-    {
-      title: "属性",
-      key: "attributes",
-      width: 220,
-      render: (_, record) => (
-        <div style={{ fontSize: 12, whiteSpace: "normal", wordBreak: "break-word" }}>
-          {formatMaybe(record.attributes)}
+          <div>
+            <strong>说明：</strong>
+            {formatMaybe(record.description)}
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <strong>属性：</strong>
+            {formatMaybe(record.attributes)}
+          </div>
+          <div style={{ color: "var(--dash-muted)", marginTop: 4 }}>
+            <strong>推荐：</strong>
+            {formatMaybe(record.reason)}
+          </div>
         </div>
       ),
     },
@@ -551,6 +590,14 @@ export default function ProductSelectPage() {
               onClick={() => loadObjectProductMatches(record, false)}
             >
               查看相似商品
+            </Button>
+            <Button
+              type="link"
+              danger
+              style={{ padding: 0 }}
+              onClick={() => deleteObjectOpportunity(record)}
+            >
+              删除商品机会
             </Button>
           </Space>
         );
@@ -702,7 +749,7 @@ export default function ProductSelectPage() {
                 <Form
                   form={monitorForm}
                   layout="vertical"
-                  initialValues={{ posts_per_profile: 3, max_images_per_post: 4, force: false }}
+                  initialValues={{ posts_per_profile: 3, max_images_per_post: 4 }}
                 >
                   <Form.Item label="本次监控对象" extra="点击监控池列表里的「填入监控表单」加入；点击标签上的 x 仅从本次任务移除。">
                     <div
@@ -737,15 +784,6 @@ export default function ProductSelectPage() {
                     <Form.Item label="每帖最多图片数" name="max_images_per_post">
                       <InputNumber min={1} max={10} />
                     </Form.Item>
-                    <Form.Item label="强制重新识别" name="force">
-                      <Select
-                        style={{ width: 140 }}
-                        options={[
-                          { value: false, label: "否" },
-                          { value: true, label: "是" },
-                        ]}
-                      />
-                    </Form.Item>
                   </Space>
                   <div>
                     <Button type="primary" onClick={runMonitorPool} loading={monitorSubmitting}>
@@ -767,11 +805,11 @@ export default function ProductSelectPage() {
                 ) : null}
               </Card>
 
-              <Card title="3. 数据库商品机会">
+              <Card title="3. 商品机会">
                 <Form
                   form={objectForm}
                   layout="inline"
-                  initialValues={{}}
+                  initialValues={{ include_inactive: false }}
                   onValuesChange={handleObjectFilterChange}
                   onFinish={loadObjects}
                   style={{ rowGap: 12, marginBottom: 16 }}
@@ -790,7 +828,23 @@ export default function ProductSelectPage() {
                     />
                   </Form.Item>
                   <Form.Item label="品类" name="category">
-                    <Input placeholder="category" style={{ width: 160 }} allowClear />
+                    <Select
+                      placeholder="选择品类"
+                      style={{ width: 180 }}
+                      allowClear
+                      showSearch
+                      options={categoryOptions}
+                      optionFilterProp="label"
+                    />
+                  </Form.Item>
+                  <Form.Item label="历史版本" name="include_inactive">
+                    <Select
+                      style={{ width: 120 }}
+                      options={[
+                        { value: false, label: "隐藏" },
+                        { value: true, label: "显示" },
+                      ]}
+                    />
                   </Form.Item>
                   <Form.Item>
                     <Button htmlType="submit" loading={objectLoading}>
