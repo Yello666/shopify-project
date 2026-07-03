@@ -55,10 +55,120 @@ function getMatchImage(match) {
   return match?.thumbnail || match?.image || match?.thumbnail_url || "";
 }
 
+function getObjectCropImageUrl(record) {
+  return record?.crop_image?.oss_url || "";
+}
+
+function getObjectSourceImageUrl(record) {
+  const img = record?.source_image;
+  return img?.oss_url || img?.source_url || "";
+}
+
 function getObjectPreviewImage(record) {
-  const cropImage = record?.crop_image;
-  const sourceImage = record?.source_image;
-  return cropImage?.oss_url || cropImage?.local_path || sourceImage?.oss_url || sourceImage?.source_url || sourceImage?.local_path || "";
+  return getObjectCropImageUrl(record) || getObjectSourceImageUrl(record);
+}
+
+function normalizeBboxStyle(bbox) {
+  if (!Array.isArray(bbox) || bbox.length !== 4) return null;
+  const nums = bbox.map((v) => Number(v));
+  if (nums.some((n) => Number.isNaN(n))) return null;
+  const [x1, y1, x2, y2] = nums;
+  if (x2 <= x1 || y2 <= y1) return null;
+  return {
+    left: `${x1 * 100}%`,
+    top: `${y1 * 100}%`,
+    width: `${(x2 - x1) * 100}%`,
+    height: `${(y2 - y1) * 100}%`,
+  };
+}
+
+function CropImagePreview({ record, onViewSource }) {
+  const cropUrl = getObjectCropImageUrl(record);
+  const sourceUrl = getObjectSourceImageUrl(record);
+
+  if (!cropUrl) {
+    return <Empty description="暂无裁剪图" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+  }
+
+  return (
+    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+      <img
+        src={cropUrl}
+        alt={record?.category || "裁剪图"}
+        style={{ maxWidth: "100%", maxHeight: "70vh", display: "block", margin: "0 auto", borderRadius: 8 }}
+      />
+      <Alert type="info" showIcon message="由识图 bbox 从原图裁剪生成，用于相似商品搜索。" />
+      {sourceUrl && onViewSource ? (
+        <Button type="link" style={{ padding: 0 }} onClick={onViewSource}>
+          查看对应原图
+        </Button>
+      ) : null}
+    </Space>
+  );
+}
+
+function SourceImagePreview({ record, onViewCrop }) {
+  const sourceUrl = getObjectSourceImageUrl(record);
+  const cropUrl = getObjectCropImageUrl(record);
+  const bboxStyle = normalizeBboxStyle(record?.bbox);
+
+  if (!sourceUrl) {
+    return <Empty description="暂无可用原图" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+  }
+
+  return (
+    <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+      <div style={{ position: "relative", display: "inline-block", maxWidth: "100%" }}>
+        <img
+          src={sourceUrl}
+          alt={record?.category || "原图"}
+          style={{ maxWidth: "100%", maxHeight: "70vh", display: "block", borderRadius: 8 }}
+        />
+        {bboxStyle ? (
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              boxSizing: "border-box",
+              border: "2px solid #ff4d4f",
+              background: "rgba(255, 77, 79, 0.15)",
+              pointerEvents: "none",
+              ...bboxStyle,
+            }}
+          />
+        ) : null}
+      </div>
+      {bboxStyle ? (
+        <Alert type="info" showIcon message="红框为识图时标注的商品区域，对应下方裁剪图。" />
+      ) : (
+        <Alert type="warning" showIcon message="该商品机会暂无 bbox，仅展示原图。" />
+      )}
+      {cropUrl ? (
+        <div>
+          <div style={{ marginBottom: 8, fontWeight: 600 }}>对应裁剪图</div>
+          {onViewCrop ? (
+            <button
+              type="button"
+              onClick={onViewCrop}
+              style={{ padding: 0, border: "none", background: "none", cursor: "pointer" }}
+            >
+              <img
+                src={cropUrl}
+                alt={record?.category || "裁剪图"}
+                style={{ maxWidth: 240, maxHeight: 240, objectFit: "contain", borderRadius: 8, border: "1px solid #f0f0f0" }}
+              />
+            </button>
+          ) : (
+            <img
+              src={cropUrl}
+              alt={record?.category || "裁剪图"}
+              style={{ maxWidth: 240, maxHeight: 240, objectFit: "contain", borderRadius: 8, border: "1px solid #f0f0f0" }}
+            />
+          )}
+        </div>
+      ) : null}
+    </Space>
+  );
 }
 
 function getSourceMonitorName(record) {
@@ -105,6 +215,19 @@ export default function ProductSelectPage() {
   const [matches, setMatches] = useState({ items: [], returned_count: 0 });
   const [selectedObject, setSelectedObject] = useState(null);
   const [matchModalOpen, setMatchModalOpen] = useState(false);
+  const [objectImagePreview, setObjectImagePreview] = useState(null);
+
+  const openObjectImagePreview = (record, type) => {
+    const hasCrop = Boolean(getObjectCropImageUrl(record));
+    const hasSource = Boolean(getObjectSourceImageUrl(record));
+    if (type === "crop" && !hasCrop) return;
+    if (type === "source" && !hasSource) return;
+    setObjectImagePreview({ record, type });
+  };
+
+  const closeObjectImagePreview = () => {
+    setObjectImagePreview(null);
+  };
 
   const loadMonitors = useCallback(
     async (values = monitorListForm.getFieldsValue()) => {
@@ -492,14 +615,26 @@ export default function ProductSelectPage() {
       width: 104,
       render: (_, record) => {
         const image = getObjectPreviewImage(record);
+        const previewType = getObjectCropImageUrl(record) ? "crop" : "source";
         return image ? (
-          <a href={image} target="_blank" rel="noopener noreferrer">
+          <button
+            type="button"
+            onClick={() => openObjectImagePreview(record, previewType)}
+            style={{
+              padding: 0,
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              lineHeight: 0,
+            }}
+            aria-label={`查看${previewType === "crop" ? "裁剪图" : "原图"}`}
+          >
             <img
               src={image}
               alt={record.category || "商品机会"}
               style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8 }}
             />
-          </a>
+          </button>
         ) : (
           "—"
         );
@@ -571,7 +706,7 @@ export default function ProductSelectPage() {
     {
       title: "操作",
       key: "action",
-      width: 130,
+      width: 140,
       render: (_, record) => {
         const contentUrl = record.source_content?.url;
         return (
@@ -583,6 +718,14 @@ export default function ProductSelectPage() {
             ) : (
               <span style={{ color: "var(--dash-muted)" }}>暂无原帖</span>
             )}
+            <Button
+              type="link"
+              style={{ padding: 0 }}
+              disabled={!getObjectSourceImageUrl(record)}
+              onClick={() => openObjectImagePreview(record, "source")}
+            >
+              查看原图
+            </Button>
             <Button
               type="link"
               style={{ padding: 0 }}
@@ -905,6 +1048,32 @@ export default function ProductSelectPage() {
             />
           </Form.Item>
         </Form>
+      </Modal>
+      <Modal
+        title={
+          objectImagePreview?.type === "crop"
+            ? `裁剪图：${objectImagePreview?.record?.category || objectImagePreview?.record?.id || ""}`
+            : `原图：${objectImagePreview?.record?.category || objectImagePreview?.record?.id || ""}`
+        }
+        open={Boolean(objectImagePreview)}
+        onCancel={closeObjectImagePreview}
+        footer={null}
+        width={900}
+        destroyOnHidden
+      >
+        {objectImagePreview?.record ? (
+          objectImagePreview.type === "crop" ? (
+            <CropImagePreview
+              record={objectImagePreview.record}
+              onViewSource={() => openObjectImagePreview(objectImagePreview.record, "source")}
+            />
+          ) : (
+            <SourceImagePreview
+              record={objectImagePreview.record}
+              onViewCrop={() => openObjectImagePreview(objectImagePreview.record, "crop")}
+            />
+          )
+        ) : null}
       </Modal>
       <Modal
         title={`相似商品：${selectedObject?.category || selectedObject?.id || ""}`}
