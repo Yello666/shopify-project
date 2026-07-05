@@ -29,6 +29,30 @@ const POTENTIAL_OPTIONS = [
   { value: "low", label: "low 低潜力" },
 ];
 
+const PROFILE_SOURCE_OPTIONS = [
+  { value: "ai", label: "AI 预测" },
+  { value: "match", label: "参考相似商品" },
+  { value: "manual", label: "人工填写" },
+];
+
+const PROFILE_STATUS_OPTIONS = [
+  { value: "draft", label: "draft 草稿" },
+  { value: "confirmed", label: "confirmed 已确认" },
+];
+
+const WEIGHT_UNIT_OPTIONS = [
+  { value: "g", label: "g 克" },
+  { value: "kg", label: "kg 千克" },
+  { value: "lb", label: "lb 磅" },
+  { value: "oz", label: "oz 盎司" },
+];
+
+const CURRENCY_OPTIONS = [
+  { value: "USD", label: "USD" },
+  { value: "CNY", label: "CNY" },
+  { value: "EUR", label: "EUR" },
+];
+
 function pickResponseData(json) {
   return json?.data && typeof json.data === "object" ? json.data : json;
 }
@@ -181,6 +205,76 @@ function formatMatchPrice(match) {
   return `${match.currency || ""}${match.price}`;
 }
 
+function profileToFormValues(profile) {
+  return {
+    cost_price_min: profile?.cost_price_min ?? null,
+    cost_price_max: profile?.cost_price_max ?? null,
+    selling_price_min: profile?.selling_price_min ?? null,
+    selling_price_max: profile?.selling_price_max ?? null,
+    currency: profile?.currency || "USD",
+    length_cm: profile?.length_cm ?? null,
+    width_cm: profile?.width_cm ?? null,
+    height_cm: profile?.height_cm ?? null,
+    volume_cm3: profile?.volume_cm3 ?? null,
+    weight_value: profile?.weight_value ?? null,
+    weight_unit: profile?.weight_unit ?? null,
+    source: profile?.source || "ai",
+    status: profile?.status || "draft",
+    reference_match_id: profile?.reference_match_id ?? null,
+    notes: profile?.notes || "",
+  };
+}
+
+function buildProfilePayload(values) {
+  const payload = {};
+  const numericFields = [
+    "cost_price_min",
+    "cost_price_max",
+    "selling_price_min",
+    "selling_price_max",
+    "length_cm",
+    "width_cm",
+    "height_cm",
+    "volume_cm3",
+    "weight_value",
+    "reference_match_id",
+  ];
+  for (const key of numericFields) {
+    if (values[key] !== undefined && values[key] !== null && values[key] !== "") {
+      payload[key] = values[key];
+    }
+  }
+  if (values.currency) payload.currency = String(values.currency).trim().toUpperCase();
+  if (values.weight_unit) payload.weight_unit = values.weight_unit;
+  if (values.source) payload.source = values.source;
+  if (values.status) payload.status = values.status;
+  if (values.notes != null && String(values.notes).trim()) {
+    payload.notes = String(values.notes).trim();
+  }
+  return payload;
+}
+
+function validateProfilePayload(payload) {
+  if (
+    payload.cost_price_min != null &&
+    payload.cost_price_max != null &&
+    payload.cost_price_min > payload.cost_price_max
+  ) {
+    return "采购成本下限不能大于上限";
+  }
+  if (
+    payload.selling_price_min != null &&
+    payload.selling_price_max != null &&
+    payload.selling_price_min > payload.selling_price_max
+  ) {
+    return "售价下限不能大于上限";
+  }
+  if (payload.weight_value != null && !payload.weight_unit) {
+    return "填写重量时必须选择单位";
+  }
+  return "";
+}
+
 export const loader = async ({ request }) => {
   try {
     await authenticate.admin(request);
@@ -196,6 +290,7 @@ export default function ProductSelectPage() {
   const [monitorListForm] = Form.useForm();
   const [monitorEditForm] = Form.useForm();
   const [objectForm] = Form.useForm();
+  const [profileForm] = Form.useForm();
 
   const [monitorListLoading, setMonitorListLoading] = useState(false);
   const [monitorUpdating, setMonitorUpdating] = useState(false);
@@ -216,6 +311,9 @@ export default function ProductSelectPage() {
   const [selectedObject, setSelectedObject] = useState(null);
   const [matchModalOpen, setMatchModalOpen] = useState(false);
   const [objectImagePreview, setObjectImagePreview] = useState(null);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [profileObject, setProfileObject] = useState(null);
+  const [profileSaving, setProfileSaving] = useState(false);
 
   const openObjectImagePreview = (record, type) => {
     const hasCrop = Boolean(getObjectCropImageUrl(record));
@@ -227,6 +325,74 @@ export default function ProductSelectPage() {
 
   const closeObjectImagePreview = () => {
     setObjectImagePreview(null);
+  };
+
+  const updateObjectInList = (objectId, patch) => {
+    setObjects((current) => ({
+      ...current,
+      items: current.items.map((item) => (item.id === objectId ? { ...item, ...patch } : item)),
+    }));
+  };
+
+  const openProfileModal = async (record) => {
+    if (!record?.id) return;
+    setProfileObject(record);
+    setProfileModalOpen(true);
+    profileForm.setFieldsValue(profileToFormValues(record.profile));
+    try {
+      const res = await authFetch(`${PRODUCT_SELECT_BASE}/objects/${record.id}/profile`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      const data = pickResponseData(json);
+      if (data && typeof data === "object") {
+        profileForm.setFieldsValue(profileToFormValues(data));
+        updateObjectInList(record.id, { profile: data });
+        setProfileObject((current) => (current?.id === record.id ? { ...current, profile: data } : current));
+      }
+    } catch {
+      // 列表里已有 profile 时仍可用；拉取失败不阻断编辑。
+    }
+  };
+
+  const closeProfileModal = () => {
+    setProfileModalOpen(false);
+    setProfileObject(null);
+    profileForm.resetFields();
+  };
+
+  const saveProfile = async () => {
+    if (!profileObject?.id) return;
+    try {
+      const values = await profileForm.validateFields();
+      const payload = buildProfilePayload(values);
+      const validationError = validateProfilePayload(payload);
+      if (validationError) {
+        message.error(validationError);
+        return;
+      }
+      const hasExisting = Boolean(profileObject.profile?.id);
+      const method = hasExisting ? "PATCH" : "PUT";
+      setProfileSaving(true);
+      const res = await authFetch(`${PRODUCT_SELECT_BASE}/objects/${profileObject.id}/profile`, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = json?.detail || json?.message || `保存失败: ${res.status}`;
+        throw new Error(typeof detail === "string" ? detail : "商品预估保存失败");
+      }
+      const data = pickResponseData(json);
+      updateObjectInList(profileObject.id, { profile: data });
+      message.success(hasExisting ? "商品预估已更新" : "商品预估已创建");
+      closeProfileModal();
+    } catch (e) {
+      if (e?.errorFields) return;
+      message.error(e instanceof Error ? e.message : "商品预估保存失败");
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   const loadMonitors = useCallback(
@@ -706,7 +872,7 @@ export default function ProductSelectPage() {
     {
       title: "操作",
       key: "action",
-      width: 140,
+      width: 150,
       render: (_, record) => {
         const contentUrl = record.source_content?.url;
         return (
@@ -725,6 +891,9 @@ export default function ProductSelectPage() {
               onClick={() => openObjectImagePreview(record, "source")}
             >
               查看原图
+            </Button>
+            <Button type="link" style={{ padding: 0 }} onClick={() => openProfileModal(record)}>
+              编辑商品预估
             </Button>
             <Button
               type="link"
@@ -1074,6 +1243,84 @@ export default function ProductSelectPage() {
             />
           )
         ) : null}
+      </Modal>
+      <Modal
+        title={`商品预估参数：${profileObject?.category || profileObject?.id || ""}`}
+        open={profileModalOpen}
+        onCancel={closeProfileModal}
+        onOk={saveProfile}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={profileSaving}
+        width={720}
+        destroyOnHidden
+      >
+        <Form
+          form={profileForm}
+          layout="vertical"
+          initialValues={profileToFormValues(null)}
+        >
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="由识图自动生成预估参数（采购/售价区间、尺寸重量等），可按需人工修改。"
+          />
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>价格区间</div>
+          <Space wrap size="middle" style={{ width: "100%" }}>
+            <Form.Item label="采购成本下限" name="cost_price_min">
+              <InputNumber min={0} step={0.01} style={{ width: 140 }} placeholder="可选" />
+            </Form.Item>
+            <Form.Item label="采购成本上限" name="cost_price_max">
+              <InputNumber min={0} step={0.01} style={{ width: 140 }} placeholder="可选" />
+            </Form.Item>
+            <Form.Item label="售价下限" name="selling_price_min">
+              <InputNumber min={0} step={0.01} style={{ width: 140 }} placeholder="可选" />
+            </Form.Item>
+            <Form.Item label="售价上限" name="selling_price_max">
+              <InputNumber min={0} step={0.01} style={{ width: 140 }} placeholder="可选" />
+            </Form.Item>
+            <Form.Item label="币种" name="currency">
+              <Select style={{ width: 100 }} options={CURRENCY_OPTIONS} />
+            </Form.Item>
+          </Space>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>尺寸与重量（可选）</div>
+          <Space wrap size="middle" style={{ width: "100%" }}>
+            <Form.Item label="长 (cm)" name="length_cm">
+              <InputNumber min={0} step={0.1} style={{ width: 120 }} placeholder="可选" />
+            </Form.Item>
+            <Form.Item label="宽 (cm)" name="width_cm">
+              <InputNumber min={0} step={0.1} style={{ width: 120 }} placeholder="可选" />
+            </Form.Item>
+            <Form.Item label="高 (cm)" name="height_cm">
+              <InputNumber min={0} step={0.1} style={{ width: 120 }} placeholder="可选" />
+            </Form.Item>
+            <Form.Item label="体积 (cm³)" name="volume_cm3">
+              <InputNumber min={0} step={0.1} style={{ width: 120 }} placeholder="可选" />
+            </Form.Item>
+            <Form.Item label="重量" name="weight_value">
+              <InputNumber min={0} step={0.001} style={{ width: 120 }} placeholder="可选" />
+            </Form.Item>
+            <Form.Item label="单位" name="weight_unit">
+              <Select allowClear style={{ width: 120 }} placeholder="可选" options={WEIGHT_UNIT_OPTIONS} />
+            </Form.Item>
+          </Space>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>元数据</div>
+          <Space wrap size="middle" style={{ width: "100%" }}>
+            <Form.Item label="来源" name="source">
+              <Select style={{ width: 160 }} options={PROFILE_SOURCE_OPTIONS} />
+            </Form.Item>
+            <Form.Item label="状态" name="status">
+              <Select style={{ width: 160 }} options={PROFILE_STATUS_OPTIONS} />
+            </Form.Item>
+            <Form.Item label="参考相似商品 ID" name="reference_match_id">
+              <InputNumber min={1} step={1} style={{ width: 160 }} placeholder="可选" />
+            </Form.Item>
+          </Space>
+          <Form.Item label="备注" name="notes">
+            <Input.TextArea rows={3} placeholder="预测依据、供应商信息等" allowClear />
+          </Form.Item>
+        </Form>
       </Modal>
       <Modal
         title={`相似商品：${selectedObject?.category || selectedObject?.id || ""}`}
