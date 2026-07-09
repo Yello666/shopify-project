@@ -71,6 +71,35 @@ function potentialTag(value) {
   return <Tag>{value || "unknown"}</Tag>;
 }
 
+function scoreLevelTag(level) {
+  const normalized = String(level || "").toLowerCase();
+  if (normalized === "high") return <Tag color="green">high</Tag>;
+  if (normalized === "medium") return <Tag color="orange">medium</Tag>;
+  if (normalized === "low") return <Tag color="default">low</Tag>;
+  return <Tag>未评分</Tag>;
+}
+
+function formatScore(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "—";
+  return numeric.toFixed(1).replace(/\.0$/, "");
+}
+
+function getMatchEvaluation(record) {
+  return record?.raw_json?.evaluation || {};
+}
+
+function getMatchField(record, key) {
+  const direct = record?.[key];
+  if (direct !== undefined && direct !== null && direct !== "") return direct;
+  const evaluation = getMatchEvaluation(record);
+  return evaluation?.[key];
+}
+
+function getEstimateDetail(profile) {
+  return profile?.estimate_detail || profile?.estimate_detail_json || {};
+}
+
 function getMatchUrl(match) {
   return match?.link || match?.url || "";
 }
@@ -475,14 +504,14 @@ export default function ProductSelectPage() {
     try {
       const url = `${PRODUCT_SELECT_BASE}/objects/${record.id}/matches`;
       const res = await authFetch(
-        refresh ? `${url}/refresh` : `${url}?${new URLSearchParams({ limit: "3" }).toString()}`,
+        refresh ? `${url}/refresh` : `${url}?${new URLSearchParams({ limit: "4" }).toString()}`,
         refresh
           ? {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 lens_type: "products",
-                limit: 3,
+                limit: 4,
               }),
             }
           : undefined,
@@ -494,11 +523,15 @@ export default function ProductSelectPage() {
       }
       const data = pickResponseData(json);
       const rawMatches = refresh ? data?.top_matches : data?.items;
-      const topMatches = Array.isArray(rawMatches) ? rawMatches.slice(0, 3) : [];
+      const topMatches = Array.isArray(rawMatches) ? rawMatches.slice(0, 4) : [];
       setMatches({
         items: topMatches,
         returned_count: topMatches.length,
       });
+      if (refresh && data?.object) {
+        setSelectedObject((current) => (current?.id === record.id ? { ...current, ...data.object } : current));
+        updateObjectInList(record.id, data.object);
+      }
       message.success(refresh ? "相似商品已刷新" : "已加载相似商品");
       if (refresh) loadObjects();
     } catch (e) {
@@ -842,11 +875,24 @@ export default function ProductSelectPage() {
       ),
     },
     {
-      title: "潜力",
-      dataIndex: "ecommerce_potential",
+      title: "潜力/评分",
       key: "potential",
-      width: 120,
-      render: potentialTag,
+      width: 140,
+      render: (_, record) => (
+        <div title={record.opportunity_score_reason || "刷新相似商品后生成机会评分"}>
+          <div>{potentialTag(record.ecommerce_potential)}</div>
+          <div style={{ marginTop: 4 }}>
+            {record.opportunity_score == null ? (
+              <Tag>待相似度分析</Tag>
+            ) : (
+              <Space size={4} wrap>
+                {scoreLevelTag(record.opportunity_score_level)}
+                <span style={{ fontWeight: 600 }}>{formatScore(record.opportunity_score)}</span>
+              </Space>
+            )}
+          </div>
+        </div>
+      ),
     },
     {
       title: "描述",
@@ -959,7 +1005,52 @@ export default function ProductSelectPage() {
       dataIndex: "match_level",
       key: "match_level",
       width: 120,
-      render: (value) => value || "—",
+      render: (_, record) => {
+        const role = getMatchField(record, "selection_role");
+        return (
+          <div>
+            <div>{record.match_level || "—"}</div>
+            <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>{formatMaybe(role)}</div>
+          </div>
+        );
+      },
+    },
+    {
+      title: "相似度",
+      key: "similarity",
+      width: 150,
+      render: (_, record) => {
+        const finalScore = getMatchField(record, "final_similarity_score");
+        const visualScore = getMatchField(record, "visual_similarity_score");
+        const keywordScore = getMatchField(record, "keyword_similarity_score");
+        const level = getMatchField(record, "similarity_level");
+        const reason = getMatchField(record, "selection_reason") || getMatchField(record, "reason");
+        return (
+          <div title={reason || ""}>
+            <Space size={4} wrap>
+              {scoreLevelTag(level)}
+              <span style={{ fontWeight: 600 }}>{formatScore(finalScore)}</span>
+            </Space>
+            <div style={{ color: "var(--dash-muted)", fontSize: 12 }}>
+              视觉 {formatScore(visualScore)} / 关键词 {formatScore(keywordScore)}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      title: "采用",
+      key: "reference",
+      width: 100,
+      render: (_, record) => {
+        const used = Boolean(getMatchField(record, "is_reference_used"));
+        const reason = getMatchField(record, "selection_reason") || getMatchField(record, "reason");
+        return (
+          <div title={reason || ""}>
+            {used ? <Tag color="green">用于估价</Tag> : <Tag>候选</Tag>}
+          </div>
+        );
+      },
     },
     {
       title: "价格",
@@ -1264,7 +1355,16 @@ export default function ProductSelectPage() {
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
-            message="由识图自动生成预估参数（采购/售价区间、尺寸重量等），可按需人工修改。"
+            message={
+              profileObject?.profile?.confidence_score == null
+                ? "由识图或相似商品分析自动生成预估参数（采购/售价区间、尺寸重量等），可按需人工修改。"
+                : `预估可信度：${formatScore(profileObject.profile.confidence_score)}，来源：${formatMaybe(profileObject.profile.source)}`
+            }
+            description={
+              getEstimateDetail(profileObject?.profile)?.used_matches?.length
+                ? `采用 ${getEstimateDetail(profileObject?.profile).used_matches.length} 个相似商品作为估价参考。`
+                : profileObject?.profile?.notes || null
+            }
           />
           <div style={{ fontWeight: 600, marginBottom: 8 }}>价格区间</div>
           <Space wrap size="middle" style={{ width: "100%" }}>
@@ -1336,7 +1436,14 @@ export default function ProductSelectPage() {
             showIcon
             message={`当前商品机会 ID：${formatMaybe(selectedObject?.id)}，来源 IP：${formatMaybe(
               getSourceMonitorName(selectedObject),
-            )}，识别 IP：${formatMaybe(selectedObject?.related_ip)}，仅展示前三个相似商品`}
+            )}，识别 IP：${formatMaybe(selectedObject?.related_ip)}，最多展示 4 个筛选后的相似商品`}
+            description={
+              selectedObject?.opportunity_score == null
+                ? "刷新相似商品后会生成商品机会评分。"
+                : `机会评分：${formatMaybe(selectedObject.opportunity_score_level)} / ${formatScore(selectedObject.opportunity_score)}。${formatMaybe(
+                    selectedObject.opportunity_score_reason,
+                  )}`
+            }
           />
           <div>
             <Button
@@ -1353,7 +1460,7 @@ export default function ProductSelectPage() {
             dataSource={matches.items}
             loading={supplyMatchObjectId != null}
             pagination={false}
-            scroll={{ x: 860 }}
+            scroll={{ x: 1120 }}
           />
         </Space>
       </Modal>
