@@ -56,7 +56,7 @@ export default defineConfig({
     // shopify app dev：同源 `/api/v1/*` 原样转到后端（与生产网关路径一致）；WS 同上。
     proxy: {
       "/api/v1": {
-        //选择本地开发环境和线上环境
+        //选择本地线上环境和开发环境
        target: "https://shop-ai.xin",
        //target: "http://localhost:8000",
         changeOrigin: true,
