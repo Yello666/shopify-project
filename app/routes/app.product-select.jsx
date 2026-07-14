@@ -234,6 +234,24 @@ function getSourceMonitorName(record) {
   return record?.source_monitor?.display_name || record?.source_monitor?.handle || "";
 }
 
+function normalizeInstagramHandle(value) {
+  let handle = String(value || "").trim();
+  if (!handle) return "";
+
+  if (/^https?:\/\//i.test(handle) || handle.includes("instagram.com")) {
+    try {
+      const url = new URL(handle.startsWith("http") ? handle : `https://${handle}`);
+      const parts = url.pathname.split("/").filter(Boolean);
+      handle = parts[0] || "";
+    } catch {
+      // fall through to plain parsing
+    }
+  }
+
+  handle = handle.replace(/^@+/, "").replace(/\/+$/, "").split(/[/?#]/)[0];
+  return handle.trim();
+}
+
 function isPublishedWithinDays(record, days) {
   if (!days) return true;
   const raw = record?.source_content?.published_at;
@@ -334,11 +352,13 @@ export default function ProductSelectPage() {
   const [monitorForm] = Form.useForm();
   const [monitorListForm] = Form.useForm();
   const [monitorEditForm] = Form.useForm();
+  const [monitorCreateForm] = Form.useForm();
   const [objectForm] = Form.useForm();
   const [profileForm] = Form.useForm();
 
   const [monitorListLoading, setMonitorListLoading] = useState(false);
   const [monitorUpdating, setMonitorUpdating] = useState(false);
+  const [monitorCreating, setMonitorCreating] = useState(false);
   const [monitorSubmitting, setMonitorSubmitting] = useState(false);
   const [objectLoading, setObjectLoading] = useState(false);
   const [supplyMatchObjectId, setSupplyMatchObjectId] = useState(null);
@@ -349,6 +369,7 @@ export default function ProductSelectPage() {
   const [monitorResult, setMonitorResult] = useState(null);
   const [editingMonitor, setEditingMonitor] = useState(null);
   const [monitorEditOpen, setMonitorEditOpen] = useState(false);
+  const [monitorCreateOpen, setMonitorCreateOpen] = useState(false);
   const [objects, setObjects] = useState({ items: [], returned_count: 0 });
   const [objectFilters, setObjectFilters] = useState({});
   const [objectError, setObjectError] = useState("");
@@ -699,6 +720,64 @@ export default function ProductSelectPage() {
       is_enabled: record.is_enabled,
     });
     setMonitorEditOpen(true);
+  };
+
+  const openMonitorCreate = () => {
+    monitorCreateForm.setFieldsValue({
+      handle: "",
+      display_name: "",
+      score: 5,
+      is_enabled: true,
+    });
+    setMonitorCreateOpen(true);
+  };
+
+  const closeMonitorCreate = () => {
+    setMonitorCreateOpen(false);
+    monitorCreateForm.resetFields();
+  };
+
+  const saveMonitorCreate = async () => {
+    try {
+      const values = await monitorCreateForm.validateFields();
+      const handle = normalizeInstagramHandle(values.handle);
+      if (!handle) {
+        message.warning("请填写有效的 Instagram 账号");
+        return;
+      }
+      if (!/^[A-Za-z0-9._]+$/.test(handle)) {
+        message.warning("Instagram 账号只能包含字母、数字、点和下划线");
+        return;
+      }
+
+      setMonitorCreating(true);
+      const payload = {
+        platform: "instagram",
+        handle,
+        display_name: values.display_name?.trim() || null,
+        monitor_type: "profile",
+        score: values.score ?? 5,
+        is_enabled: values.is_enabled !== false,
+      };
+      const res = await authFetch(`${PRODUCT_SELECT_BASE}/monitors`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = json?.detail || json?.message || `新增失败: ${res.status}`;
+        throw new Error(typeof detail === "string" ? detail : "监控账号新增失败");
+      }
+      message.success("监控账号已新增");
+      closeMonitorCreate();
+      loadMonitors();
+    } catch (e) {
+      if (e?.errorFields) return;
+      message.error(e instanceof Error ? e.message : "监控账号新增失败");
+    } finally {
+      setMonitorCreating(false);
+    }
   };
 
   const saveMonitorEdit = async () => {
@@ -1174,6 +1253,9 @@ export default function ProductSelectPage() {
                       <Button htmlType="submit" loading={monitorListLoading}>
                         查询
                       </Button>
+                      <Button type="primary" onClick={openMonitorCreate}>
+                        新增监控对象
+                      </Button>
                       <Button onClick={addEnabledMonitorsToRun}>
                         填入全部启用对象
                       </Button>
@@ -1328,6 +1410,41 @@ export default function ProductSelectPage() {
           </div>
         </s-section>
       </s-page>
+      <Modal
+        title="新增监控对象"
+        open={monitorCreateOpen}
+        onCancel={closeMonitorCreate}
+        onOk={saveMonitorCreate}
+        okText="新增"
+        cancelText="取消"
+        confirmLoading={monitorCreating}
+        destroyOnHidden
+      >
+        <Form form={monitorCreateForm} layout="vertical" initialValues={{ score: 5, is_enabled: true }}>
+          <Form.Item
+            label="Instagram 账号"
+            name="handle"
+            extra="可填用户名，或粘贴主页链接；会自动去掉 @ 和 URL 前缀。"
+            rules={[{ required: true, message: "请输入 Instagram 账号" }]}
+          >
+            <Input placeholder="例如：nikoo 或 https://www.instagram.com/nikoo/" allowClear />
+          </Form.Item>
+          <Form.Item label="显示名称" name="display_name">
+            <Input placeholder="例如：NiKo（可选）" allowClear />
+          </Form.Item>
+          <Form.Item label="评分" name="score" rules={[{ required: true, message: "请填写评分" }]}>
+            <InputNumber min={0} max={10} step={0.5} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item label="状态" name="is_enabled">
+            <Select
+              options={[
+                { value: true, label: "启用" },
+                { value: false, label: "停用" },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
       <Modal
         title={`编辑监控对象：${editingMonitor?.display_name || editingMonitor?.handle || ""}`}
         open={monitorEditOpen}
