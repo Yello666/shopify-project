@@ -6,6 +6,7 @@ import {
   Alert,
   Button,
   Card,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -163,6 +164,706 @@ function CropImagePreview({ record, onViewSource }) {
         </Button>
       ) : null}
     </Space>
+  );
+}
+
+function journeyStepStatus(done, pending = false) {
+  if (done) return { label: "已完成", color: "#237804", bg: "#f6ffed", border: "#b7eb8f", dot: "#52c41a" };
+  if (pending) return { label: "待处理", color: "#ad6800", bg: "#fffbe6", border: "#ffe58f", dot: "#faad14" };
+  return { label: "未执行", color: "#8c8c8c", bg: "#fafafa", border: "#d9d9d9", dot: "#bfbfbf" };
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function JourneyStep({ index, title, status, isLast, children }) {
+  const style = journeyStepStatus(status === "done", status === "pending");
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "28px 1fr", columnGap: 14 }}>
+      <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: "50%",
+            background: style.dot,
+            color: "#fff",
+            fontSize: 13,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1,
+            flexShrink: 0,
+          }}
+        >
+          {index}
+        </div>
+        {!isLast ? (
+          <div
+            style={{
+              width: 2,
+              flex: 1,
+              minHeight: 24,
+              marginTop: 4,
+              background: "#e5e7eb",
+            }}
+          />
+        ) : null}
+      </div>
+      <div style={{ paddingBottom: isLast ? 0 : 28 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#1f1f1f" }}>{title}</div>
+          <span
+            style={{
+              fontSize: 12,
+              color: style.color,
+              background: style.bg,
+              border: `1px solid ${style.border}`,
+              borderRadius: 999,
+              padding: "1px 10px",
+              lineHeight: "20px",
+            }}
+          >
+            {style.label}
+          </span>
+        </div>
+        <div
+          style={{
+            border: "1px solid #f0f0f0",
+            borderRadius: 12,
+            background: "#fff",
+            padding: 16,
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function JourneyMetaRow({ label, value }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "88px 1fr", gap: 8, fontSize: 13, lineHeight: 1.6 }}>
+      <div style={{ color: "#8c8c8c" }}>{label}</div>
+      <div style={{ color: "#262626", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>{value}</div>
+    </div>
+  );
+}
+
+function FormulaCard({ title, items, result }) {
+  return (
+    <div
+      style={{
+        marginTop: 4,
+        borderRadius: 10,
+        border: "1px solid #edf2f7",
+        background: "#f8fafc",
+        padding: 12,
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 10 }}>{title}</div>
+      <Space direction="vertical" size={8} style={{ width: "100%" }}>
+        {items.map((item) => (
+          <div
+            key={item.label}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr auto",
+              gap: 12,
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            <div>
+              <div style={{ color: "#334155", fontWeight: 600 }}>{item.label}</div>
+              {item.detail ? <div style={{ color: "#94a3b8", marginTop: 2 }}>{item.detail}</div> : null}
+            </div>
+            <div style={{ color: "#0f172a", fontWeight: 700, whiteSpace: "nowrap" }}>{item.value}</div>
+          </div>
+        ))}
+        {result ? (
+          <div
+            style={{
+              marginTop: 2,
+              paddingTop: 10,
+              borderTop: "1px dashed #dbe3ee",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <div style={{ fontSize: 12, color: "#475569", fontWeight: 600 }}>{result.label}</div>
+            <div style={{ fontSize: 14, color: "#0f172a", fontWeight: 800 }}>{result.value}</div>
+          </div>
+        ) : null}
+      </Space>
+    </div>
+  );
+}
+
+function potentialBaseScore(potential) {
+  const normalized = String(potential || "").toLowerCase();
+  if (normalized === "high") return 80;
+  if (normalized === "medium") return 60;
+  if (normalized === "low") return 40;
+  return 55;
+}
+
+function isAmazonMatch(item) {
+  if (item?.is_amazon != null) return Boolean(item.is_amazon);
+  const evaluation = getMatchEvaluation(item);
+  if (evaluation?.is_amazon != null) return Boolean(evaluation.is_amazon);
+  const source = String(item?.source || item?.store || "").toLowerCase();
+  return source.includes("amazon");
+}
+
+function buildEstimateFormula(profile, usedMatches) {
+  const prices = usedMatches
+    .map((item) => Number(item.price))
+    .filter((price) => Number.isFinite(price) && price > 0)
+    .sort((a, b) => a - b);
+  const currency = profile?.currency || "USD";
+  const sellingMin = profile?.selling_price_min;
+  const sellingMax = profile?.selling_price_max;
+  const costMin = profile?.cost_price_min;
+  const costMax = profile?.cost_price_max;
+
+  const priceItems = [
+    {
+      label: "建议售价区间",
+      detail:
+        prices.length > 0
+          ? `采用参考商品零售价 min~max（${prices.map((p) => formatScore(p)).join(", ")}）`
+          : "来自被采用的相似商品零售价区间",
+      value:
+        sellingMin != null || sellingMax != null
+          ? `${currency} ${formatScore(sellingMin ?? sellingMax)} ~ ${formatScore(sellingMax ?? sellingMin)}`
+          : "—",
+    },
+    {
+      label: "采购成本区间",
+      detail: "按建议售价保守反推：约售价 × 25% ~ 45%",
+      value:
+        costMin != null || costMax != null
+          ? `${currency} ${formatScore(costMin ?? costMax)} ~ ${formatScore(costMax ?? costMin)}`
+          : "—",
+    },
+  ];
+
+  const similarities = usedMatches
+    .map((item) => Number(getMatchField(item, "final_similarity_score")))
+    .filter((score) => Number.isFinite(score));
+  const avgSimilarity =
+    similarities.length > 0 ? similarities.reduce((sum, score) => sum + score, 0) / similarities.length : null;
+  const countScore = usedMatches.length > 0 ? Math.min(100, 45 + usedMatches.length * 18) : null;
+  const sellMinNum = Number(sellingMin);
+  const sellMaxNum = Number(sellingMax);
+  let spreadBonus = null;
+  if (Number.isFinite(sellMinNum) && Number.isFinite(sellMaxNum) && sellMinNum > 0) {
+    const spread = (sellMaxNum - sellMinNum) / sellMinNum;
+    spreadBonus = Math.max(0, 10 - spread * 8);
+  }
+
+  const confidenceItems = [];
+  if (avgSimilarity != null) {
+    confidenceItems.push({
+      label: "参考平均相似度 × 65%",
+      detail: `平均相似度 ${formatScore(avgSimilarity)}`,
+      value: formatScore(avgSimilarity * 0.65),
+    });
+  }
+  if (countScore != null) {
+    confidenceItems.push({
+      label: "参考数量分 × 25%",
+      detail: `min(100, 45 + ${usedMatches.length}×18) = ${formatScore(countScore)}`,
+      value: formatScore(countScore * 0.25),
+    });
+  }
+  if (spreadBonus != null) {
+    confidenceItems.push({
+      label: "售价区间稳定性",
+      detail: "区间越窄加分越高，最高约 +10",
+      value: `+${formatScore(spreadBonus)}`,
+    });
+  }
+
+  return {
+    priceItems,
+    confidenceItems,
+    confidenceResult:
+      profile?.confidence_score != null
+        ? { label: "预估可信度", value: formatScore(profile.confidence_score) }
+        : null,
+  };
+}
+
+function buildOpportunityFormula(record, matches) {
+  const list = Array.isArray(matches) ? matches : [];
+  const allScores = list
+    .map((item) => Number(getMatchField(item, "final_similarity_score")))
+    .filter((score) => Number.isFinite(score));
+  const referenceScores = list
+    .filter((item) => Boolean(getMatchField(item, "is_reference_used")))
+    .map((item) => Number(getMatchField(item, "final_similarity_score")))
+    .filter((score) => Number.isFinite(score));
+
+  const potentialBase = potentialBaseScore(record?.ecommerce_potential);
+  const bestSimilarity = allScores.length ? Math.max(...allScores) : null;
+  const avgReference =
+    referenceScores.length > 0
+      ? referenceScores.reduce((sum, score) => sum + score, 0) / referenceScores.length
+      : 35;
+  const confidence = Number(record?.profile?.confidence_score);
+  const confidenceValue = Number.isFinite(confidence) ? confidence : 35;
+  const amazonBonus = list.some(
+    (item) => Boolean(getMatchField(item, "is_reference_used")) && isAmazonMatch(item),
+  )
+    ? 5
+    : 0;
+
+  const potentialPart = potentialBase * 0.3;
+  const bestPart = (bestSimilarity ?? 0) * 0.3;
+  const referencePart = avgReference * 0.22;
+  const confidencePart = confidenceValue * 0.15;
+  const computed =
+    bestSimilarity == null
+      ? null
+      : Math.max(0, Math.min(100, potentialPart + bestPart + referencePart + confidencePart + amazonBonus));
+
+  return {
+    items: [
+      {
+        label: "识图潜力 × 30%",
+        detail: `潜力 ${String(record?.ecommerce_potential || "unknown").toLowerCase()} → 基础分 ${potentialBase}`,
+        value: formatScore(potentialPart),
+      },
+      {
+        label: "最高相似度 × 30%",
+        detail: bestSimilarity == null ? "暂无相似分数" : `候选最高相似度 ${formatScore(bestSimilarity)}`,
+        value: bestSimilarity == null ? "—" : formatScore(bestPart),
+      },
+      {
+        label: "参考商品平均相似度 × 22%",
+        detail:
+          referenceScores.length > 0
+            ? `采用 ${referenceScores.length} 个参考商品，平均 ${formatScore(avgReference)}`
+            : "无采用参考时按 35 分兜底",
+        value: formatScore(referencePart),
+      },
+      {
+        label: "预估可信度 × 15%",
+        detail: `可信度 ${formatScore(confidenceValue)}`,
+        value: formatScore(confidencePart),
+      },
+      {
+        label: "Amazon 参考加分",
+        detail: amazonBonus > 0 ? "采用了 Amazon 参考商品" : "未采用 Amazon 参考",
+        value: `+${formatScore(amazonBonus)}`,
+      },
+    ],
+    result: {
+      label: "最终机会评分",
+      value:
+        record?.opportunity_score != null
+          ? `${formatScore(record.opportunity_score)}（${record.opportunity_score_level || "—"}）`
+          : computed == null
+            ? "—"
+            : `${formatScore(computed)}`,
+    },
+  };
+}
+
+function RecommendationJourneyPanel({ record, matches, profile, loading }) {
+  if (!record) return null;
+
+  const sourceUrl = getObjectSourceImageUrl(record);
+  const cropUrl = getObjectCropImageUrl(record);
+  const content = record.source_content || {};
+  const contentUrl = content.url;
+  const bboxStyle = normalizeBboxStyle(record.bbox);
+  const topMatches = Array.isArray(matches) ? matches.slice(0, 4) : [];
+  const usedMatches = topMatches.filter((item) => Boolean(getMatchField(item, "is_reference_used")));
+  const estimateDetail = getEstimateDetail(profile);
+  const estimateFormula = buildEstimateFormula(profile, usedMatches);
+  const opportunityFormula = buildOpportunityFormula(
+    { ...record, profile: profile || record.profile },
+    topMatches,
+  );
+  const hasRecognition = Boolean(record.category || record.description || record.reason || cropUrl || sourceUrl);
+  const hasMatches = topMatches.length > 0;
+  const hasProfile = Boolean(
+    profile &&
+      (profile.cost_price_min != null ||
+        profile.cost_price_max != null ||
+        profile.selling_price_min != null ||
+        profile.selling_price_max != null ||
+        profile.notes),
+  );
+  const hasScore = record.opportunity_score != null;
+
+  const currency = profile?.currency || "USD";
+  const formatMoneyRange = (min, max) => {
+    if (min == null && max == null) return "—";
+    if (min != null && max != null) return `${currency} ${formatScore(min)} ~ ${formatScore(max)}`;
+    return `${currency} ${formatScore(min ?? max)}`;
+  };
+
+  if (loading) {
+    return (
+      <div style={{ padding: "48px 0", textAlign: "center" }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: "#f7f8fa", margin: "-24px", padding: "24px 20px 32px" }}>
+      <div
+        style={{
+          marginBottom: 20,
+          padding: "16px 18px",
+          borderRadius: 14,
+          background: "#111827",
+          color: "#fff",
+        }}
+      >
+        <div style={{ fontSize: 12, opacity: 0.72, marginBottom: 6 }}>商品机会推荐链路</div>
+        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
+          {record.category || "未分类商品机会"}
+        </div>
+        <Space size={8} wrap>
+          <Tag color={record.is_active === false ? "default" : "green"}>
+            v{record.recognition_version || 1}
+            {record.is_active === false ? " 历史" : " 当前"}
+          </Tag>
+          {potentialTag(record.ecommerce_potential)}
+          {hasScore ? scoreLevelTag(record.opportunity_score_level) : <Tag>待相似度分析</Tag>}
+          {hasScore ? (
+            <span style={{ fontWeight: 700, fontSize: 16 }}>{formatScore(record.opportunity_score)}</span>
+          ) : null}
+        </Space>
+        <div style={{ marginTop: 10, fontSize: 13, opacity: 0.78 }}>
+          来源 IP：{formatMaybe(getSourceMonitorName(record))} · 识别 IP：{formatMaybe(record.related_ip)}
+        </div>
+      </div>
+
+      <JourneyStep
+        index={1}
+        title="来源帖子"
+        status={contentUrl || content.caption_or_title || content.published_at ? "done" : "pending"}
+        isLast={false}
+      >
+        <Space direction="vertical" size={10} style={{ width: "100%" }}>
+          <JourneyMetaRow label="监控账号" value={formatMaybe(getSourceMonitorName(record))} />
+          <JourneyMetaRow label="发布时间" value={formatDateTime(content.published_at)} />
+          <JourneyMetaRow
+            label="原帖链接"
+            value={
+              contentUrl ? (
+                <a href={contentUrl} target="_blank" rel="noopener noreferrer">
+                  {contentUrl}
+                </a>
+              ) : (
+                "—"
+              )
+            }
+          />
+          <JourneyMetaRow label="帖子文案" value={formatMaybe(content.caption_or_title)} />
+        </Space>
+      </JourneyStep>
+
+      <JourneyStep index={2} title="AI 识图框选" status={hasRecognition ? "done" : "pending"} isLast={false}>
+        <Space direction="vertical" size={14} style={{ width: "100%" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 12, color: "#8c8c8c", marginBottom: 8 }}>原图 + bbox</div>
+              {sourceUrl ? (
+                <div
+                  style={{
+                    position: "relative",
+                    display: "inline-block",
+                    maxWidth: "100%",
+                    borderRadius: 10,
+                    overflow: "hidden",
+                    border: "1px solid #f0f0f0",
+                    background: "#fafafa",
+                  }}
+                >
+                  <img
+                    src={sourceUrl}
+                    alt="原图"
+                    style={{
+                      display: "block",
+                      maxWidth: "100%",
+                      maxHeight: 220,
+                    }}
+                  />
+                  {bboxStyle ? (
+                    <div
+                      aria-hidden
+                      style={{
+                        position: "absolute",
+                        boxSizing: "border-box",
+                        border: "2px solid #ff4d4f",
+                        background: "rgba(255, 77, 79, 0.12)",
+                        pointerEvents: "none",
+                        ...bboxStyle,
+                      }}
+                    />
+                  ) : null}
+                </div>
+              ) : (
+                <Empty description="暂无原图" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: "#8c8c8c", marginBottom: 8 }}>裁剪商品图</div>
+              {cropUrl ? (
+                <div
+                  style={{
+                    borderRadius: 10,
+                    overflow: "hidden",
+                    border: "1px solid #f0f0f0",
+                    background: "#fafafa",
+                    textAlign: "center",
+                  }}
+                >
+                  <img
+                    src={cropUrl}
+                    alt="裁剪图"
+                    style={{
+                      display: "block",
+                      maxWidth: "100%",
+                      maxHeight: 220,
+                      margin: "0 auto",
+                    }}
+                  />
+                </div>
+              ) : (
+                <Empty description="暂无裁剪图" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </div>
+          </div>
+          <JourneyMetaRow label="品类" value={formatMaybe(record.category)} />
+          <JourneyMetaRow label="关联 IP" value={formatMaybe(record.related_ip)} />
+          <JourneyMetaRow label="外观描述" value={formatMaybe(record.description)} />
+          <JourneyMetaRow label="属性标签" value={formatMaybe(record.attributes)} />
+          <JourneyMetaRow label="识图理由" value={formatMaybe(record.reason)} />
+          <JourneyMetaRow label="识图潜力" value={potentialTag(record.ecommerce_potential)} />
+        </Space>
+      </JourneyStep>
+
+      <JourneyStep
+        index={3}
+        title="相似商品检索"
+        status={hasMatches ? "done" : "pending"}
+        isLast={false}
+      >
+        {hasMatches ? (
+          <Space direction="vertical" size={12} style={{ width: "100%" }}>
+            <div style={{ fontSize: 13, color: "#595959" }}>
+              共 {topMatches.length} 个候选
+              {usedMatches.length ? `，其中 ${usedMatches.length} 个用于估价` : ""}
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "#64748b",
+                background: "#f8fafc",
+                border: "1px solid #edf2f7",
+                borderRadius: 8,
+                padding: "8px 10px",
+              }}
+            >
+              相似度主要由视觉相似与关键词相似综合；标记「用于估价」的商品会进入后续售价/成本与可信度计算。
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {topMatches.map((item, index) => {
+                const image = getMatchImage(item);
+                const url = getMatchUrl(item);
+                const used = Boolean(getMatchField(item, "is_reference_used"));
+                const finalScore = getMatchField(item, "final_similarity_score");
+                const visualScore = getMatchField(item, "visual_similarity_score");
+                const keywordScore = getMatchField(item, "keyword_similarity_score");
+                const reason = getMatchField(item, "selection_reason") || getMatchField(item, "reason");
+                return (
+                  <div
+                    key={item.id || url || `${item.title}-${index}`}
+                    style={{
+                      border: used ? "1px solid #b7eb8f" : "1px solid #f0f0f0",
+                      background: used ? "#f6ffed" : "#fafafa",
+                      borderRadius: 10,
+                      padding: 10,
+                      display: "grid",
+                      gridTemplateColumns: "64px 1fr",
+                      gap: 10,
+                    }}
+                  >
+                    {image ? (
+                      <img
+                        src={image}
+                        alt={item.title || "相似商品"}
+                        style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8 }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: 64,
+                          height: 64,
+                          borderRadius: 8,
+                          background: "#f0f0f0",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "#bfbfbf",
+                          fontSize: 12,
+                        }}
+                      >
+                        无图
+                      </div>
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, lineHeight: 1.4 }}>
+                        {item.title || "未命名商品"}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#8c8c8c", marginTop: 4 }}>
+                        {formatMaybe(item.source)} · {formatMatchPrice(item)}
+                      </div>
+                      <div style={{ marginTop: 6 }}>
+                        <Space size={4} wrap>
+                          {used ? <Tag color="green">用于估价</Tag> : <Tag>候选</Tag>}
+                          <Tag>相似 {formatScore(finalScore)}</Tag>
+                        </Space>
+                      </div>
+                      <div style={{ marginTop: 4, fontSize: 11, color: "#94a3b8" }}>
+                        视觉 {formatScore(visualScore)} / 关键词 {formatScore(keywordScore)}
+                      </div>
+                      {reason ? (
+                        <div style={{ marginTop: 4, fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>
+                          {String(reason)}
+                        </div>
+                      ) : null}
+                      {url ? (
+                        <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>
+                          打开链接
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Space>
+        ) : (
+          <Empty description="尚未检索相似商品，可先点击「查看相似商品」或在此刷新" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
+      </JourneyStep>
+
+      <JourneyStep index={4} title="成本与售价预估" status={hasProfile ? "done" : "pending"} isLast={false}>
+        {hasProfile ? (
+          <Space direction="vertical" size={10} style={{ width: "100%" }}>
+            <JourneyMetaRow
+              label="采购成本"
+              value={formatMoneyRange(profile.cost_price_min, profile.cost_price_max)}
+            />
+            <JourneyMetaRow
+              label="建议售价"
+              value={formatMoneyRange(profile.selling_price_min, profile.selling_price_max)}
+            />
+            <JourneyMetaRow
+              label="尺寸重量"
+              value={
+                [
+                  profile.length_cm != null || profile.width_cm != null || profile.height_cm != null
+                    ? `${formatMaybe(profile.length_cm)} × ${formatMaybe(profile.width_cm)} × ${formatMaybe(profile.height_cm)} cm`
+                    : null,
+                  profile.weight_value != null ? `${formatScore(profile.weight_value)} ${profile.weight_unit || ""}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "—"
+              }
+            />
+            <JourneyMetaRow label="预估来源" value={formatMaybe(profile.source)} />
+            <JourneyMetaRow label="可信度" value={formatScore(profile.confidence_score)} />
+            <JourneyMetaRow
+              label="参考商品"
+              value={
+                estimateDetail?.used_matches?.length
+                  ? `采用 ${estimateDetail.used_matches.length} 个相似商品`
+                  : formatMaybe(profile.reference_match_id)
+              }
+            />
+            <JourneyMetaRow label="备注" value={formatMaybe(profile.notes)} />
+            <FormulaCard title="价格推算公式" items={estimateFormula.priceItems} />
+            {estimateFormula.confidenceItems.length ? (
+              <FormulaCard
+                title="预估可信度公式"
+                items={estimateFormula.confidenceItems}
+                result={estimateFormula.confidenceResult}
+              />
+            ) : null}
+          </Space>
+        ) : (
+          <Empty description="暂无预估参数，可点击「编辑商品预估」补充" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
+      </JourneyStep>
+
+      <JourneyStep index={5} title="推荐结论" status={hasScore ? "done" : "pending"} isLast>
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "14px 16px",
+              borderRadius: 12,
+              background: hasScore ? "#f6ffed" : "#fafafa",
+              border: hasScore ? "1px solid #b7eb8f" : "1px solid #f0f0f0",
+            }}
+          >
+            {hasScore ? (
+              <>
+                {scoreLevelTag(record.opportunity_score_level)}
+                <span style={{ fontSize: 28, fontWeight: 700, lineHeight: 1 }}>
+                  {formatScore(record.opportunity_score)}
+                </span>
+                <span style={{ color: "#8c8c8c", fontSize: 13 }}>机会评分</span>
+              </>
+            ) : (
+              <span style={{ color: "#8c8c8c" }}>完成相似商品分析后会生成机会评分</span>
+            )}
+          </div>
+          {hasScore || hasMatches ? (
+            <FormulaCard
+              title="机会评分公式"
+              items={opportunityFormula.items}
+              result={opportunityFormula.result}
+            />
+          ) : null}
+          {record.opportunity_score_reason ? (
+            <JourneyMetaRow label="计算原文" value={record.opportunity_score_reason} />
+          ) : null}
+          <JourneyMetaRow label="识图推荐" value={formatMaybe(record.reason)} />
+          <JourneyMetaRow
+            label="链路状态"
+            value={
+              hasScore
+                ? "已形成推荐结论，可供运营决策"
+                : hasMatches
+                  ? "已有相似商品，待补全评分/预估"
+                  : "仍停留在识图阶段"
+            }
+          />
+        </Space>
+      </JourneyStep>
+    </div>
   );
 }
 
@@ -380,6 +1081,11 @@ export default function ProductSelectPage() {
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileObject, setProfileObject] = useState(null);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [journeyOpen, setJourneyOpen] = useState(false);
+  const [journeyLoading, setJourneyLoading] = useState(false);
+  const [journeyObject, setJourneyObject] = useState(null);
+  const [journeyMatches, setJourneyMatches] = useState([]);
+  const [journeyProfile, setJourneyProfile] = useState(null);
 
   const openObjectImagePreview = (record, type) => {
     const hasCrop = Boolean(getObjectCropImageUrl(record));
@@ -424,6 +1130,51 @@ export default function ProductSelectPage() {
     setProfileModalOpen(false);
     setProfileObject(null);
     profileForm.resetFields();
+  };
+
+  const openRecommendationJourney = async (record) => {
+    if (!record?.id) return;
+    setJourneyObject(record);
+    setJourneyOpen(true);
+    setJourneyLoading(true);
+    setJourneyMatches([]);
+    setJourneyProfile(record.profile || null);
+    try {
+      const [matchesRes, profileRes] = await Promise.all([
+        authFetch(`${PRODUCT_SELECT_BASE}/objects/${record.id}/matches?${new URLSearchParams({ limit: "4" }).toString()}`),
+        authFetch(`${PRODUCT_SELECT_BASE}/objects/${record.id}/profile`),
+      ]);
+      const matchesJson = await matchesRes.json().catch(() => ({}));
+      const profileJson = await profileRes.json().catch(() => ({}));
+
+      if (matchesRes.ok) {
+        const matchesData = pickResponseData(matchesJson);
+        const items = Array.isArray(matchesData?.items) ? matchesData.items.slice(0, 4) : [];
+        setJourneyMatches(items);
+      } else {
+        setJourneyMatches([]);
+      }
+
+      if (profileRes.ok) {
+        const profileData = pickResponseData(profileJson);
+        if (profileData && typeof profileData === "object") {
+          setJourneyProfile(profileData);
+          updateObjectInList(record.id, { profile: profileData });
+        }
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "推荐链路加载失败");
+    } finally {
+      setJourneyLoading(false);
+    }
+  };
+
+  const closeRecommendationJourney = () => {
+    setJourneyOpen(false);
+    setJourneyObject(null);
+    setJourneyMatches([]);
+    setJourneyProfile(null);
+    setJourneyLoading(false);
   };
 
   const saveProfile = async () => {
@@ -1047,11 +1798,18 @@ export default function ProductSelectPage() {
     {
       title: "操作",
       key: "action",
-      width: 150,
+      width: 168,
       render: (_, record) => {
         const contentUrl = record.source_content?.url;
         return (
           <Space direction="vertical" size={2}>
+            <Button
+              type="link"
+              style={{ padding: 0, fontWeight: 600 }}
+              onClick={() => openRecommendationJourney(record)}
+            >
+              推荐链路
+            </Button>
             {contentUrl ? (
               <a href={contentUrl} target="_blank" rel="noopener noreferrer">
                 查看原帖
@@ -1591,6 +2349,21 @@ export default function ProductSelectPage() {
           </Form.Item>
         </Form>
       </Modal>
+      <Drawer
+        title={null}
+        open={journeyOpen}
+        onClose={closeRecommendationJourney}
+        width={720}
+        destroyOnHidden
+        styles={{ body: { padding: 24, background: "#f7f8fa" } }}
+      >
+        <RecommendationJourneyPanel
+          record={journeyObject}
+          matches={journeyMatches}
+          profile={journeyProfile}
+          loading={journeyLoading}
+        />
+      </Drawer>
       <Modal
         title={`相似商品：${selectedObject?.category || selectedObject?.id || ""}`}
         open={matchModalOpen}
