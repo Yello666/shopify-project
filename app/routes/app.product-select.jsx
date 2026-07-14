@@ -17,6 +17,7 @@ import {
   Statistic,
   Table,
   Tag,
+  Tooltip,
   message,
 } from "antd";
 import { authFetch } from "../utils/auth-api";
@@ -27,6 +28,11 @@ const POTENTIAL_OPTIONS = [
   { value: "high", label: "high 高潜力" },
   { value: "medium", label: "medium 中潜力" },
   { value: "low", label: "low 低潜力" },
+];
+
+const PUBLISHED_WITHIN_OPTIONS = [
+  { value: 7, label: "7 天内" },
+  { value: 30, label: "30 天内" },
 ];
 
 const PROFILE_SOURCE_OPTIONS = [
@@ -226,6 +232,16 @@ function SourceImagePreview({ record, onViewCrop }) {
 
 function getSourceMonitorName(record) {
   return record?.source_monitor?.display_name || record?.source_monitor?.handle || "";
+}
+
+function isPublishedWithinDays(record, days) {
+  if (!days) return true;
+  const raw = record?.source_content?.published_at;
+  if (!raw) return false;
+  const publishedAt = new Date(raw);
+  if (Number.isNaN(publishedAt.getTime())) return false;
+  const cutoff = Date.now() - Number(days) * 24 * 60 * 60 * 1000;
+  return publishedAt.getTime() >= cutoff;
 }
 
 function formatMatchPrice(match) {
@@ -483,6 +499,7 @@ export default function ProductSelectPage() {
         setObjectFilters({
           potential: values?.potential,
           source_monitor: values?.source_monitor,
+          published_within: values?.published_within,
         });
       } catch (e) {
         const detail = e instanceof Error ? e.message : "商品机会加载失败";
@@ -664,11 +681,14 @@ export default function ProductSelectPage() {
   };
 
   const handleObjectFilterChange = (changedValues, allValues) => {
-    if (!("potential" in changedValues) && !("source_monitor" in changedValues)) return;
     setObjectFilters({
       potential: allValues.potential,
       source_monitor: allValues.source_monitor,
+      published_within: allValues.published_within,
     });
+    if ("category" in changedValues || "include_inactive" in changedValues) {
+      loadObjects(allValues);
+    }
   };
 
   const openMonitorEdit = (record) => {
@@ -735,9 +755,10 @@ export default function ProductSelectPage() {
     return objects.items.filter((item) => {
       if (objectFilters.potential && item.ecommerce_potential !== objectFilters.potential) return false;
       if (objectFilters.source_monitor && getSourceMonitorName(item) !== objectFilters.source_monitor) return false;
+      if (objectFilters.published_within && !isPublishedWithinDays(item, objectFilters.published_within)) return false;
       return true;
     });
-  }, [objectFilters.potential, objectFilters.source_monitor, objects.items]);
+  }, [objectFilters.potential, objectFilters.published_within, objectFilters.source_monitor, objects.items]);
 
   const monitorColumns = [
     {
@@ -888,6 +909,35 @@ export default function ProductSelectPage() {
               <Space size={4} wrap>
                 {scoreLevelTag(record.opportunity_score_level)}
                 <span style={{ fontWeight: 600 }}>{formatScore(record.opportunity_score)}</span>
+                <Tooltip
+                  title={
+                    <div style={{ maxWidth: 320, whiteSpace: "pre-line", lineHeight: 1.6 }}>
+                      {record.opportunity_score_reason ||
+                        "评分由识图潜力、相似商品匹配度、预估可信度和 Amazon 参考加分共同计算。"}
+                    </div>
+                  }
+                  placement="top"
+                >
+                  <span
+                    aria-label="查看机会评分计算过程"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 16,
+                      height: 16,
+                      border: "1px solid #8c8c8c",
+                      borderRadius: "50%",
+                      color: "#595959",
+                      cursor: "help",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      lineHeight: 1,
+                    }}
+                  >
+                    ?
+                  </span>
+                </Tooltip>
               </Space>
             )}
           </div>
@@ -1214,7 +1264,6 @@ export default function ProductSelectPage() {
                   layout="inline"
                   initialValues={{ include_inactive: false }}
                   onValuesChange={handleObjectFilterChange}
-                  onFinish={loadObjects}
                   style={{ rowGap: 12, marginBottom: 16 }}
                 >
                   <Form.Item label="潜力" name="potential">
@@ -1228,6 +1277,14 @@ export default function ProductSelectPage() {
                       showSearch
                       options={sourceIpOptions}
                       optionFilterProp="label"
+                    />
+                  </Form.Item>
+                  <Form.Item label="发帖时间" name="published_within">
+                    <Select
+                      placeholder="全部"
+                      style={{ width: 140 }}
+                      allowClear
+                      options={PUBLISHED_WITHIN_OPTIONS}
                     />
                   </Form.Item>
                   <Form.Item label="品类" name="category">
@@ -1248,11 +1305,6 @@ export default function ProductSelectPage() {
                         { value: true, label: "显示" },
                       ]}
                     />
-                  </Form.Item>
-                  <Form.Item>
-                    <Button htmlType="submit" loading={objectLoading}>
-                      查询
-                    </Button>
                   </Form.Item>
                 </Form>
                 {objectLoading ? (
